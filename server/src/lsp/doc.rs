@@ -34,7 +34,7 @@ impl Document {
     pub fn get_node_at_pos(
         &self,
         pos: tower_lsp::lsp_types::Position,
-    ) -> Option<tree_sitter::Node> {
+    ) -> Option<tree_sitter::Node<'_>> {
         let mut cursor = self.tree.walk();
         let point = Document::point_to_pos(pos);
 

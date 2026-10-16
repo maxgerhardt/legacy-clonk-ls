@@ -46,9 +46,9 @@ impl AssetHandler for DefCoreHandler {
 
     fn get_completions(
         &self,
-        tree: &tree_sitter::Tree,
-        source: &str,
-        cursor_pos: tower_lsp::lsp_types::Position,
+        _tree: &tree_sitter::Tree,
+        _source: &str,
+        _cursor_pos: tower_lsp::lsp_types::Position,
     ) -> Option<Vec<CompletionItem>> {
         if let Some(section_map) = DEFS.get("HEAD") {
             Some(

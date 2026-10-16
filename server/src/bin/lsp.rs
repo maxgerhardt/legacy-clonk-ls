@@ -4,7 +4,6 @@ use legacy_clonk_ls::lang::Translation;
 use legacy_clonk_ls::lsp::doc::{DocType, Document};
 use legacy_clonk_ls::lsp::token_types::TokenTypes;
 use legacy_clonk_ls::workspace::{IdInfo, Workspace};
-use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::fs::OpenOptions;
 use std::sync::RwLock;
