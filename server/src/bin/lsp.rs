@@ -1,4 +1,5 @@
 use dashmap::DashMap;
+use legacy_clonk_ls::analysis::{diagnostics, index::{self as c4index, Index}, query};
 use legacy_clonk_ls::lang::Translation;
 use legacy_clonk_ls::lsp::doc::{DocType, Document};
 use legacy_clonk_ls::lsp::token_types::TokenTypes;
@@ -30,6 +31,8 @@ struct Backend {
     token_types: RwLock<TokenTypes>,
     documents: DashMap<Url, Document>,
     workspace: RwLock<Workspace>,
+    /// C4Script index of all scripts below the workspace roots
+    index: RwLock<Index>,
 }
 
 impl Backend {
@@ -211,6 +214,38 @@ impl Backend {
         }
     }
 
+    /// Re-index an open script and compute its diagnostics.
+    fn analyze(&self, uri: &Url) -> Option<Vec<Diagnostic>> {
+        let doc = self.documents.get(uri)?;
+        if !matches!(doc.doc_type, DocType::Script) {
+            return None;
+        }
+        let path = c4index::uri_to_path(uri)?;
+        let info = c4index::extract(&path, &doc.source, &doc.tree);
+        let mut index = self.index.write().ok()?;
+        let diags = diagnostics::diagnose(&index, &info, &doc.source, &doc.tree);
+        index.update_file(info);
+        Some(diags)
+    }
+
+    async fn refresh(&self, uri: Url) {
+        if let Some(diags) = self.analyze(&uri) {
+            self.client.publish_diagnostics(uri, diags, None).await;
+        }
+    }
+
+    /// Run a query against an open script document with fresh index info.
+    fn with_script<T>(&self, uri: &Url, f: impl FnOnce(&Index, &c4index::FileInfo, &Document) -> T) -> Option<T> {
+        let doc = self.documents.get(uri)?;
+        if !matches!(doc.doc_type, DocType::Script) {
+            return None;
+        }
+        let path = c4index::uri_to_path(uri)?;
+        let info = c4index::extract(&path, &doc.source, &doc.tree);
+        let index = self.index.read().ok()?;
+        Some(f(&index, &info, &doc))
+    }
+
     fn drop_document(&self, uri: &Url) {
         self.documents.remove(uri);
     }
@@ -258,6 +293,34 @@ impl LanguageServer for Backend {
             Translation::configure(lang_tag);
         }
 
+        // Index all Clonk scripts below the workspace roots (+ initializationOptions.extraRoots, env C4LS_EXTRA_ROOTS)
+        let mut roots: Vec<std::path::PathBuf> = vec![];
+        #[allow(deprecated)]
+        if let Some(uri) = &params.root_uri {
+            roots.extend(uri.to_file_path().ok());
+        }
+        for wf in params.workspace_folders.iter().flatten() {
+            roots.extend(wf.uri.to_file_path().ok());
+        }
+        if let Some(opts) = &params.initialization_options {
+            for r in opts.get("extraRoots").and_then(|v| v.as_array()).into_iter().flatten() {
+                roots.extend(r.as_str().map(std::path::PathBuf::from));
+            }
+        }
+        if let Ok(extra) = std::env::var("C4LS_EXTRA_ROOTS") {
+            roots.extend(extra.split(';').filter(|s| !s.is_empty()).map(std::path::PathBuf::from));
+        }
+        if roots.is_empty() {
+            roots.extend(std::env::current_dir().ok());
+        }
+        let index = Index::build(roots);
+        self.client
+            .log_message(MessageType::INFO, format!("indexed {} scripts, {} definitions", index.files.len(), index.ids.len()))
+            .await;
+        if let Ok(mut i) = self.index.write() {
+            *i = index;
+        }
+
         let text_document_sync_capabilities =
             TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL);
 
@@ -266,6 +329,10 @@ impl LanguageServer for Backend {
                 semantic_tokens_provider: semantic_tokens_capabilities,
                 text_document_sync: Some(text_document_sync_capabilities),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                definition_provider: Some(OneOf::Left(true)),
+                references_provider: Some(OneOf::Left(true)),
+                document_symbol_provider: Some(OneOf::Left(true)),
+                workspace_symbol_provider: Some(OneOf::Left(true)),
                 signature_help_provider: Some(SignatureHelpOptions {
                     ..Default::default()
                 }),
@@ -276,9 +343,12 @@ impl LanguageServer for Backend {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        let uri = params.text_document.uri.clone();
         if let Err(e) = self.add_document(params.text_document.uri, params.text_document.text) {
             self.client.log_message(MessageType::INFO, e).await;
+            return;
         }
+        self.refresh(uri).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -287,7 +357,35 @@ impl LanguageServer for Backend {
         if let Err(e) = self.change_document(&uri, params.content_changes[0].text.clone()) {
             tracing::error!("Error when updating text document ({:?}): {}", &uri, e);
             self.client.log_message(MessageType::INFO, e).await;
+            return;
         }
+        self.refresh(uri).await;
+    }
+
+    async fn goto_definition(&self, params: GotoDefinitionParams) -> Result<Option<GotoDefinitionResponse>> {
+        let p = params.text_document_position_params;
+        let locs = self.with_script(&p.text_document.uri, |idx, info, doc| query::definition(idx, info, &doc.tree, &doc.source, p.position));
+        Ok(locs.filter(|l| !l.is_empty()).map(GotoDefinitionResponse::Array))
+    }
+
+    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        let p = params.text_document_position;
+        let decl = params.context.include_declaration;
+        Ok(self.with_script(&p.text_document.uri, |idx, info, doc| query::references(idx, info, &doc.tree, &doc.source, p.position, decl)))
+    }
+
+    async fn document_symbol(&self, params: DocumentSymbolParams) -> Result<Option<DocumentSymbolResponse>> {
+        Ok(self
+            .with_script(&params.text_document.uri, |_, info, _| query::document_symbols(info))
+            .map(DocumentSymbolResponse::Nested))
+    }
+
+    async fn symbol(&self, params: WorkspaceSymbolParams) -> Result<Option<Vec<SymbolInformation>>> {
+        let index = match self.index.read() {
+            Ok(i) => i,
+            Err(_) => return Ok(None),
+        };
+        Ok(Some(query::workspace_symbols(&index, &params.query)))
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
@@ -357,6 +455,13 @@ impl LanguageServer for Backend {
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         let uri = params.text_document_position_params.text_document.uri;
+        let pos = params.text_document_position_params.position;
+        if let Some(text) = self.with_script(&uri, |idx, info, doc| query::hover(idx, info, &doc.tree, &doc.source, pos)).flatten() {
+            return Ok(Some(Hover {
+                contents: HoverContents::Markup(MarkupContent { kind: MarkupKind::Markdown, value: text }),
+                range: None,
+            }));
+        }
         match self.documents.get(&uri) {
             Some(doc) => {
                 let handler = doc.doc_type.get_handler();
@@ -398,6 +503,7 @@ async fn start_language_server() {
         client,
         documents: DashMap::new(),
         workspace: RwLock::new(Workspace::new()),
+        index: RwLock::new(Index::default()),
     })
     .custom_method("x-legacy-clonk/getAllIds", Backend::request_ids)
     .finish();

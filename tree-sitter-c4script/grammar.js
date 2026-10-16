@@ -71,8 +71,8 @@ module.exports = grammar({
 
         parameter_list: $ => seq(
             '(',
-            optional($.param),
-            repeat(seq(',', $.param)),
+            optional(choice($.param, '...')),
+            repeat(seq(',', choice($.param, '...'))),
             ')',
         ),
 

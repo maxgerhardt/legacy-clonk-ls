@@ -235,8 +235,17 @@
           "type": "CHOICE",
           "members": [
             {
-              "type": "SYMBOL",
-              "name": "param"
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "SYMBOL",
+                  "name": "param"
+                },
+                {
+                  "type": "STRING",
+                  "value": "..."
+                }
+              ]
             },
             {
               "type": "BLANK"
@@ -253,8 +262,17 @@
                 "value": ","
               },
               {
-                "type": "SYMBOL",
-                "name": "param"
+                "type": "CHOICE",
+                "members": [
+                  {
+                    "type": "SYMBOL",
+                    "name": "param"
+                  },
+                  {
+                    "type": "STRING",
+                    "value": "..."
+                  }
+                ]
               }
             ]
           }
@@ -2475,4 +2493,3 @@
   "inline": [],
   "supertypes": []
 }
-
