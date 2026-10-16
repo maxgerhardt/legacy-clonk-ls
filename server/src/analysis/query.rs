@@ -46,7 +46,7 @@ fn loc(path: &std::path::Path, range: Range) -> Option<Location> {
 fn func_markdown(file: &FileInfo, f: &FuncDef, index: &Index) -> String {
     let mut s = format!("```c4script\n{}\n```", f.signature());
     let owner = match &file.def_id {
-        Some(id) => match index.ids.get(id).and_then(|i| i.name.clone()) {
+        Some(id) => match index.id_any(id).and_then(|i| i.name.clone()) {
             Some(n) => format!("{} ({})", id, n),
             None => id.clone(),
         },
@@ -65,7 +65,10 @@ fn call_targets<'a>(index: &'a Index, info: &'a FileInfo, name: &str, arrow: boo
     if !arrow && !visible.is_empty() {
         return visible;
     }
-    let mut all = index.all_funcs(name);
+    let mut all = index.reachable_funcs(&info.path, name);
+    if all.is_empty() {
+        all = index.all_funcs(name);
+    }
     all.sort_by_key(|(f, _)| path_key(&f.path));
     all
 }
@@ -107,7 +110,7 @@ pub fn hover(index: &Index, info: &FileInfo, tree: &Tree, src: &str, pos: Positi
             if s.is_empty() { None } else { Some(s) }
         }
         Target::Id { id } => {
-            let i = match index.ids.get(&id) {
+            let i = match index.id_for(&id, &info.path).or_else(|| index.id_any(&id)) {
                 Some(i) => i,
                 None => {
                     let std = super::diagnostics::standard_id(&id)?;
@@ -168,7 +171,7 @@ pub fn definition(index: &Index, info: &FileInfo, tree: &Tree, src: &str, pos: P
         Target::FuncDef { name } => index.all_funcs(&name).into_iter().filter_map(|(f, d)| loc(&f.path, d.name_range)).collect(),
         Target::Id { id } => {
             let mut out = vec![];
-            if let Some(i) = index.ids.get(&id) {
+            if let Some(i) = index.id_for(&id, &info.path).or_else(|| index.id_any(&id)) {
                 if let Some(s) = &i.script {
                     out.extend(loc(s, Range::default()));
                 }
@@ -337,7 +340,7 @@ pub fn workspace_symbols(index: &Index, query: &str) -> Vec<SymbolInformation> {
             }
         }
     }
-    for i in index.ids.values() {
+    for i in index.ids.values().flatten() {
         let name = i.name.clone().unwrap_or_default();
         if i.id.to_lowercase().contains(&q) || name.to_lowercase().contains(&q) {
             let p = Position::new(i.line, 0);

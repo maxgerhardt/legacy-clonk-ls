@@ -86,9 +86,12 @@ pub struct IdInfo {
 pub struct Index {
     pub roots: Vec<PathBuf>,
     pub files: HashMap<String, FileInfo>,
-    pub ids: HashMap<String, IdInfo>,
+    /// definition ID -> all definitions with that ID (scenarios may each have their own)
+    pub ids: HashMap<String, Vec<IdInfo>>,
     /// Packs named in `DefinitionN=` lines of the Scenario.txt files found while scanning (e.g. "Knights.c4d")
     pub referenced_packs: HashSet<String>,
+    /// scenario folder key (path_key + "/") -> file names (lowercase) of the packs it loads
+    pub scenario_packs: HashMap<String, Vec<String>>,
     /// Extra folders indexed because a script inside them was opened (see `cover`)
     pub covered: Vec<PathBuf>,
 }
@@ -330,24 +333,100 @@ impl Index {
         }
     }
 
-    /// Remember the packs a scenario loads: [Definitions] Definition1=Objects.c4d, ...
+    /// Remember the packs a scenario loads ([Definitions] in Scenario.txt, see C4SDefinitions):
+    /// `Definition1=Objects.c4d` ... `Definition10=`, or `Definitions=A.c4d;B.c4d`; `LocalOnly=1` loads none.
+    /// Without any entry the engine uses the definitions from its configuration; we assume Objects.c4d then.
     fn collect_definitions(&mut self, p: &Path) {
         let text = match std::fs::read(p) {
             Ok(b) => decode_bytes(&b),
             Err(_) => return,
         };
+        let mut packs: Vec<String> = vec![];
+        let mut local_only = false;
         for line in text.lines() {
             let line = line.trim();
             if let Some((key, value)) = line.split_once('=') {
                 let key = key.trim();
-                if key.len() > 10 && key[..10].eq_ignore_ascii_case("Definition") && key[10..].chars().all(|c| c.is_ascii_digit()) {
-                    let v = value.trim().replace('\\', "/");
-                    if !v.is_empty() {
-                        self.referenced_packs.insert(v);
-                    }
+                let value = value.trim().replace('\\', "/");
+                let numbered = key.len() > 10 && key[..10].eq_ignore_ascii_case("Definition") && key[10..].chars().all(|c| c.is_ascii_digit());
+                if numbered && !value.is_empty() {
+                    packs.push(value);
+                } else if key.eq_ignore_ascii_case("Definitions") {
+                    packs.extend(value.split(';').map(|v| v.trim().to_string()).filter(|v| !v.is_empty()));
+                } else if key.eq_ignore_ascii_case("LocalOnly") {
+                    local_only = value == "1" || value.eq_ignore_ascii_case("true");
                 }
             }
         }
+        if local_only {
+            packs.clear();
+        } else if packs.is_empty() {
+            packs.push("Objects.c4d".to_string());
+        }
+        self.referenced_packs.extend(packs.iter().cloned());
+        if let Some(dir) = p.parent() {
+            let names = packs
+                .iter()
+                .map(|v| v.rsplit('/').next().unwrap_or(v).to_lowercase())
+                .collect();
+            self.scenario_packs.insert(format!("{}/", path_key(dir)), names);
+        }
+    }
+
+    /// Would the engine load `target` (a script or DefCore.txt) when running the scenario `from` belongs to?
+    /// Mirrors C4Game::OpenScenario/InitDefs: the scenario's own folder, every enclosing .c4f folder (minus
+    /// other scenarios inside them), the packs from its [Definitions], and System.c4g groups. Scripts that
+    /// aren't part of a scenario (packs, folder definitions) can be loaded by any scenario: everything is
+    /// visible from them.
+    pub fn visible_from(&self, from: &Path, target: &Path) -> bool {
+        let fk = path_key(from);
+        let tk = path_key(target);
+        let scen = match prefix_through(&fk, ".c4s", true) {
+            Some(s) => s,
+            None => return true,
+        };
+        if tk.starts_with(&scen) {
+            return true;
+        }
+        // local definitions of other scenarios are never loaded
+        if prefix_through(&tk, ".c4s", true).is_some() {
+            return false;
+        }
+        let folders = folder_prefixes(&scen);
+        if folders.iter().any(|f| tk.starts_with(f.as_str())) {
+            return true;
+        }
+        let default_packs = vec!["objects.c4d".to_string()];
+        let packs = self.scenario_packs.get(&scen).unwrap_or(&default_packs);
+        if packs.iter().any(|p| tk.contains(&format!("/{}/", p))) {
+            return true;
+        }
+        // System.c4g of the game (not of some other folder)
+        tk.contains("/system.c4g/") && prefix_through(&tk, ".c4f", false).is_none()
+    }
+
+    /// Does the scenario of script `from` load the pack with this file name (e.g. "Knights.c4d")?
+    /// Scripts outside scenarios: always.
+    pub fn loads_pack(&self, from: &Path, pack: &str) -> bool {
+        let scen = match prefix_through(&path_key(from), ".c4s", true) {
+            Some(s) => s,
+            None => return true,
+        };
+        let name = pack.rsplit('/').next().unwrap_or(pack).to_lowercase();
+        match self.scenario_packs.get(&scen) {
+            Some(packs) => packs.contains(&name),
+            None => name == "objects.c4d",
+        }
+    }
+
+    /// First definition with this ID that the script `from` can see.
+    pub fn id_for(&self, id: &str, from: &Path) -> Option<&IdInfo> {
+        self.ids.get(id)?.iter().find(|i| self.visible_from(from, &i.defcore))
+    }
+
+    /// Any definition with this ID (e.g. for hovers in pack scripts).
+    pub fn id_any(&self, id: &str) -> Option<&IdInfo> {
+        self.ids.get(id)?.first()
     }
 
     /// Make sure the Clonk folder around `file` is indexed, even if it lies outside the roots (clients may pass
@@ -380,8 +459,16 @@ impl Index {
         for (k, f) in other.files {
             self.files.entry(k).or_insert(f);
         }
-        for (k, i) in other.ids {
-            self.ids.entry(k).or_insert(i);
+        for (k, v) in other.ids {
+            let list = self.ids.entry(k).or_default();
+            for i in v {
+                if !list.iter().any(|x| path_key(&x.defcore) == path_key(&i.defcore)) {
+                    list.push(i);
+                }
+            }
+        }
+        for (k, v) in other.scenario_packs {
+            self.scenario_packs.entry(k).or_insert(v);
         }
         self.covered.extend(other.covered);
     }
@@ -409,8 +496,11 @@ impl Index {
         }
         if let Some(id) = id {
             let script = p.parent().map(|d| d.join("Script.c")).filter(|s| s.exists());
-            // first one wins (workspace roots are scanned first)
-            self.ids.entry(id.clone()).or_insert(IdInfo { id, name, defcore: p.to_path_buf(), line, script });
+            let list = self.ids.entry(id.clone()).or_default();
+            if !list.iter().any(|x| path_key(&x.defcore) == path_key(p)) {
+                // workspace roots are scanned first, so their definitions come first
+                list.push(IdInfo { id, name, defcore: p.to_path_buf(), line, script });
+            }
         }
     }
 
@@ -418,8 +508,8 @@ impl Index {
         self.files.insert(path_key(&info.path), info);
     }
 
-    fn script_of(&self, id: &str) -> Option<&FileInfo> {
-        let script = self.ids.get(id)?.script.as_ref()?;
+    fn script_of(&self, id: &str, from: &Path) -> Option<&FileInfo> {
+        let script = self.id_for(id, from)?.script.as_ref()?;
         self.files.get(&path_key(script))
     }
 
@@ -437,12 +527,15 @@ impl Index {
             let mut ids: Vec<&str> = f.includes.iter().map(|s| s.as_str()).collect();
             ids.extend(f.appendto.iter().filter(|t| t.as_str() != "*").map(|s| s.as_str()));
             for id in ids {
-                if let Some(s) = self.script_of(id) {
+                if let Some(s) = self.script_of(id, &info.path) {
                     todo.push(s);
                 }
             }
             if let Some(own) = &f.def_id {
                 for other in self.files.values() {
+                    if !self.visible_from(&info.path, &other.path) {
+                        continue;
+                    }
                     if other.appendto.iter().any(|t| t == own || (t == "*" && f.def_id.is_some())) {
                         todo.push(other);
                     }
@@ -452,9 +545,10 @@ impl Index {
         out
     }
 
-    pub fn global_funcs<'a>(&'a self, name: &str) -> Vec<(&'a FileInfo, &'a FuncDef)> {
+    /// Global functions named `name` that the script `from` can see.
+    pub fn global_funcs<'a>(&'a self, from: &Path, name: &str) -> Vec<(&'a FileInfo, &'a FuncDef)> {
         let mut out = vec![];
-        for f in self.files.values() {
+        for f in self.files.values().filter(|f| self.visible_from(from, &f.path)) {
             for func in &f.funcs {
                 if func.name == name && (f.is_system || func.visibility.as_deref() == Some("global")) {
                     out.push((f, func));
@@ -462,6 +556,11 @@ impl Index {
             }
         }
         out
+    }
+
+    /// Functions named `name` in any script the script `from` can see (targets of `obj->Name()` calls).
+    pub fn reachable_funcs<'a>(&'a self, from: &Path, name: &str) -> Vec<(&'a FileInfo, &'a FuncDef)> {
+        self.all_funcs(name).into_iter().filter(|(f, _)| self.visible_from(from, &f.path)).collect()
     }
 
     pub fn all_funcs<'a>(&'a self, name: &str) -> Vec<(&'a FileInfo, &'a FuncDef)> {
@@ -486,7 +585,7 @@ impl Index {
                 }
             }
         }
-        for g in self.global_funcs(name) {
+        for g in self.global_funcs(&info.path, name) {
             if !out.iter().any(|(f, d)| path_key(&f.path) == path_key(&g.0.path) && d.name_range == g.1.name_range) {
                 out.push(g);
             }
@@ -506,7 +605,7 @@ impl Index {
             }
         }
         if out.is_empty() {
-            for f in self.files.values() {
+            for f in self.files.values().filter(|f| self.visible_from(&info.path, &f.path)) {
                 for v in &f.vars {
                     if v.name == name && v.kind != VarKind::Local {
                         out.push((f, v));
@@ -617,4 +716,18 @@ fn unpack_cached(game_dir: &Path, pack: &Path) -> Result<PathBuf, String> {
         return Err(format!("c4group failed ({})", status));
     }
     Ok(target)
+}
+
+/// Key prefix up to and including the first (outermost) path segment with this extension, with trailing '/'.
+/// With `dir_only`, the segment must be a folder (not the last segment).
+fn prefix_through(key: &str, ext: &str, dir_only: bool) -> Option<String> {
+    let segs: Vec<&str> = key.split('/').collect();
+    let n = if dir_only { segs.len().saturating_sub(1) } else { segs.len() };
+    segs[..n].iter().position(|s| s.ends_with(ext)).map(|i| format!("{}/", segs[..=i].join("/")))
+}
+
+/// Prefixes (with trailing '/') of all .c4f folders a scenario folder key lies in.
+fn folder_prefixes(scenario: &str) -> Vec<String> {
+    let segs: Vec<&str> = scenario.trim_end_matches('/').split('/').collect();
+    (0..segs.len()).filter(|&i| segs[i].ends_with(".c4f")).map(|i| format!("{}/", segs[..=i].join("/"))).collect()
 }

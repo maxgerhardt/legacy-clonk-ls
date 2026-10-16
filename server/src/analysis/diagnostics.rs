@@ -147,7 +147,7 @@ impl<'a> Ctx<'a> {
         let range = self.li.node_range(&name_node);
         if super::index::is_arrow_call(n) {
             // resolved at runtime; only hint if no script defines it at all
-            if self.index.all_funcs(name).is_empty() && !ENGINE.functions.contains_key(name) {
+            if self.index.reachable_funcs(&self.info.path, name).is_empty() && !ENGINE.functions.contains_key(name) {
                 self.out.push(diag(range, DiagnosticSeverity::INFORMATION, "unknown-method",
                     format!("no indexed script defines a function '{}' (called via ->)", name)));
             }
@@ -175,11 +175,15 @@ impl<'a> Ctx<'a> {
             return;
         }
         let elsewhere = self.index.all_funcs(name);
-        let msg = match elsewhere.first() {
-            Some((f, _)) => format!(
+        let loaded = elsewhere.iter().find(|(f, _)| self.index.visible_from(&self.info.path, &f.path));
+        let msg = match (loaded, elsewhere.first()) {
+            (None, Some((f, _))) => format!(
+                "unknown identifier: {} (only defined in {}, which this scenario doesn't load: not in its folder, its .c4f folders or the packs of its [Definitions])",
+                name, f.path.display()),
+            (Some((f, _)), _) => format!(
                 "unknown identifier: {} (defined in {} but not visible here: not global, not in this script, its #include chain or #appendto scripts)",
                 name, f.path.display()),
-            None => format!("unknown identifier: {} (not an engine function and not defined in any indexed script)", name),
+            (None, None) => format!("unknown identifier: {} (not an engine function and not defined in any indexed script)", name),
         };
         self.out.push(diag(range, DiagnosticSeverity::ERROR, "unknown-identifier", msg));
     }
@@ -188,7 +192,7 @@ impl<'a> Ctx<'a> {
     fn has_overloaded(&self, f: &str) -> bool {
         let own = super::index::path_key(&self.info.path);
         self.index.scope_files(self.info).iter().any(|file| super::index::path_key(&file.path) != own && file.funcs.iter().any(|x| x.name == f))
-            || !self.index.global_funcs(f).is_empty()
+            || !self.index.global_funcs(&self.info.path, f).is_empty()
             || ENGINE.functions.contains_key(f)
     }
 
@@ -237,11 +241,24 @@ impl<'a> Ctx<'a> {
         if id.chars().all(|c| c.is_ascii_digit()) {
             return; // a number like 1000, which the grammar's ID pattern also matches
         }
-        if self.index.ids.contains_key(id) || standard_id(id).is_some() || ENGINE.constants.contains_key(id) || self.index.visible_vars(self.info, id).len() > 0 {
+        let std = standard_id(id);
+        if self.index.id_for(id, &self.info.path).is_some()
+            || std.map(|s| self.index.loads_pack(&self.info.path, &s.tlc)).unwrap_or(false)
+            || ENGINE.constants.contains_key(id)
+            || !self.index.visible_vars(self.info, id).is_empty()
+        {
             return;
         }
-        self.out.push(diag(self.li.node_range(n), DiagnosticSeverity::WARNING, "unknown-id",
-            format!("unknown definition ID: {} (no DefCore.txt in the indexed folders and no standard pack has id={})", id, id)));
+        let msg = if let Some(i) = self.index.id_any(id) {
+            format!("definition {} is not loaded by this scenario: it's defined in {}, which isn't in the scenario, its .c4f folders or the packs of its [Definitions]",
+                id, i.defcore.parent().unwrap_or(&i.defcore).display())
+        } else if let Some(s) = std {
+            format!("definition {} ({}) is from {}, which this scenario doesn't load: add Definition<N>={} to its Scenario.txt [Definitions]",
+                id, s.name, s.tlc, s.tlc)
+        } else {
+            format!("unknown definition ID: {} (no DefCore.txt in the indexed folders and no standard pack has id={})", id, id)
+        };
+        self.out.push(diag(self.li.node_range(n), DiagnosticSeverity::WARNING, "unknown-id", msg));
     }
 }
 

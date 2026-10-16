@@ -35,7 +35,7 @@ fn main() {
     if roots.is_empty() {
         roots.push(std::env::current_dir().unwrap());
     }
-    let roots: Vec<PathBuf> = roots.into_iter().map(|r| r.canonicalize().unwrap_or(r)).collect();
+    let roots: Vec<PathBuf> = roots.into_iter().map(|r| absolute(&r)).collect();
     let mut index = Index::build(roots);
     if let Some(gd) = &game_dir {
         let packs = index::game_packs_to_index(&index, gd, all_packs);
@@ -45,7 +45,7 @@ fn main() {
         }
         index.merge(packs_index);
     }
-    let targets: Vec<String> = targets.iter().map(|t| path_key(&t.canonicalize().unwrap_or(t.clone()))).collect();
+    let targets: Vec<String> = targets.iter().map(|t| path_key(&absolute(t))).collect();
     let mut files: Vec<_> = index.files.values().filter(|f| {
         let k = path_key(&f.path);
         targets.is_empty() || targets.iter().any(|t| k.starts_with(t.as_str()))
@@ -73,4 +73,14 @@ fn main() {
     eprintln!("checked {} files ({} indexed, {} ids): {} errors, {} warnings, {} infos",
         files.len(), index.files.len(), index.ids.len(), n_err, n_warn, n_info);
     if n_err > 0 { std::process::exit(1); }
+}
+
+/// Canonical absolute path without the Windows verbatim prefix (\\?\) that canonicalize() adds.
+fn absolute(p: &PathBuf) -> PathBuf {
+    let c = p.canonicalize().unwrap_or_else(|_| p.clone());
+    let s = c.to_string_lossy();
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) if !rest.starts_with("UNC") => PathBuf::from(rest),
+        _ => c,
+    }
 }
