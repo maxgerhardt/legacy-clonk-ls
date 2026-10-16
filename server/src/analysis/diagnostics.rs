@@ -112,7 +112,14 @@ impl<'a> Ctx<'a> {
             "method_call" => self.check_call(&n),
             "identifier" => self.check_identifier(&n),
             "id" => self.check_id(&n),
-            "comment" | "string" | "func_desc" | "include" | "appendto" | "pragma_strict" => return,
+            // #include/#appendto: only the target ID matters (it may not be loaded by this scenario)
+            "include" | "appendto" => {
+                for c in named_children(&n).into_iter().filter(|c| c.kind() == "id") {
+                    self.check_id(&c);
+                }
+                return;
+            }
+            "comment" | "string" | "func_desc" | "pragma_strict" => return,
             _ => {}
         }
         for c in named_children(&n) {
