@@ -248,6 +248,39 @@ impl Backend {
         Some(f(&index, &info, &doc))
     }
 
+    /// Index the game's packs that aren't indexed yet (Objects.c4d + packs named in scenarios' [Definitions]).
+    /// Unpacking with c4group can take a few seconds, so it runs on a blocking thread; open scripts are
+    /// re-checked afterwards.
+    async fn index_game_packs(&self) {
+        let game = self.game.read().ok().and_then(|g| g.clone());
+        let (game_dir, all) = match game {
+            Some(g) => g,
+            None => return,
+        };
+        let packs = match self.index.read() {
+            Ok(i) => legacy_clonk_ls::analysis::index::game_packs_to_index(&i, &game_dir, all),
+            Err(_) => return,
+        };
+        if packs.is_empty() {
+            return;
+        }
+        let result = tokio::task::spawn_blocking(move || legacy_clonk_ls::analysis::index::index_game_packs(&game_dir, &packs)).await;
+        if let Ok((packs_index, log)) = result {
+            // merge before logging, so "indexed pack X" means X is usable
+            if let Ok(mut i) = self.index.write() {
+                i.merge(packs_index);
+            }
+            for l in log {
+                tracing::info!("{}", l);
+                self.client.log_message(MessageType::INFO, l).await;
+            }
+            let open: Vec<Url> = self.documents.iter().map(|d| d.key().clone()).collect();
+            for uri in open {
+                self.refresh(uri).await;
+            }
+        }
+    }
+
     fn drop_document(&self, uri: &Url) {
         self.documents.remove(uri);
     }
@@ -369,6 +402,14 @@ impl LanguageServer for Backend {
             self.client.log_message(MessageType::INFO, e).await;
             return;
         }
+        // A script outside the indexed roots: index its scenario/definition folder (and the packs it loads)
+        let newly = uri.to_file_path().ok().and_then(|p| self.index.write().ok().and_then(|mut i| i.cover(&p)));
+        if let Some(dir) = newly {
+            let msg = format!("indexed {} (outside the workspace roots)", dir.display());
+            tracing::info!("{}", msg);
+            self.client.log_message(MessageType::INFO, msg).await;
+            self.index_game_packs().await;
+        }
         self.refresh(uri).await;
     }
 
@@ -450,31 +491,7 @@ impl LanguageServer for Backend {
         self.client
             .log_message(MessageType::INFO, "server initialized")
             .await;
-        // Index the game's packs (Objects.c4d + packs named in scenarios' [Definitions]); unpacking with
-        // c4group can take a few seconds, so it runs on a blocking thread and open scripts are re-checked after.
-        let game = self.game.read().ok().and_then(|g| g.clone());
-        if let Some((game_dir, all)) = game {
-            let packs = match self.index.read() {
-                Ok(i) => legacy_clonk_ls::analysis::index::game_packs_to_index(&i, &game_dir, all),
-                Err(_) => vec![],
-            };
-            let result = tokio::task::spawn_blocking(move || {
-                legacy_clonk_ls::analysis::index::index_game_packs(&game_dir, &packs)
-            })
-            .await;
-            if let Ok((packs_index, log)) = result {
-                for l in log {
-                    self.client.log_message(MessageType::INFO, l).await;
-                }
-                if let Ok(mut i) = self.index.write() {
-                    i.merge(packs_index);
-                }
-                let open: Vec<Url> = self.documents.iter().map(|d| d.key().clone()).collect();
-                for uri in open {
-                    self.refresh(uri).await;
-                }
-            }
-        }
+        self.index_game_packs().await;
     }
 
     async fn shutdown(&self) -> Result<()> {

@@ -89,6 +89,8 @@ pub struct Index {
     pub ids: HashMap<String, IdInfo>,
     /// Packs named in `DefinitionN=` lines of the Scenario.txt files found while scanning (e.g. "Knights.c4d")
     pub referenced_packs: HashSet<String>,
+    /// Extra folders indexed because a script inside them was opened (see `cover`)
+    pub covered: Vec<PathBuf>,
 }
 
 pub fn path_key(p: &Path) -> String {
@@ -348,6 +350,31 @@ impl Index {
         }
     }
 
+    /// Make sure the Clonk folder around `file` is indexed, even if it lies outside the roots (clients may pass
+    /// a different workspace root, or none). Indexes the outermost enclosing .c4s/.c4d/.c4f/.c4g folder.
+    /// Returns that folder if it was newly indexed.
+    pub fn cover(&mut self, file: &Path) -> Option<PathBuf> {
+        let outermost = file
+            .ancestors()
+            .skip(1)
+            .filter(|a| {
+                let n = a.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+                [".c4s", ".c4d", ".c4f", ".c4g"].iter().any(|e| n.ends_with(e))
+            })
+            .last()?
+            .to_path_buf();
+        let key = path_key(&outermost);
+        let inside = |base: &PathBuf| key.starts_with(&path_key(base));
+        if self.roots.iter().any(inside) || self.covered.iter().any(inside) {
+            return None;
+        }
+        let mut parser = new_parser();
+        let mut seen = HashSet::new();
+        self.scan_dir(&outermost, &mut parser, &mut seen);
+        self.covered.push(outermost.clone());
+        Some(outermost)
+    }
+
     /// Merge another index (e.g. of game packs); existing entries win.
     pub fn merge(&mut self, other: Index) {
         for (k, f) in other.files {
@@ -356,6 +383,7 @@ impl Index {
         for (k, i) in other.ids {
             self.ids.entry(k).or_insert(i);
         }
+        self.covered.extend(other.covered);
     }
 
     /// Is a pack with this file name (e.g. "Objects.c4d") already indexed as a folder somewhere?
@@ -547,6 +575,7 @@ pub fn index_game_packs(game_dir: &Path, packs: &[String]) -> (Index, Vec<String
         if let Some(dir) = dir {
             let before = index.files.len();
             index.scan_dir(&dir, &mut parser, &mut seen);
+            index.covered.push(dir.clone());
             log.push(format!("indexed pack {} ({} scripts) from {}", pack, index.files.len() - before, dir.display()));
         }
     }
