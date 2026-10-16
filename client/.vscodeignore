@@ -2,5 +2,6 @@
 !client/out/extension.js
 !client/out/lsp
 !client/out/lsp.exe
+!client/out/lsp-*
 !icon.png
 !icons/

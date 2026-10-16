@@ -326,10 +326,18 @@ impl LanguageServer for Backend {
         if roots.is_empty() {
             roots.extend(std::env::current_dir().ok());
         }
+        #[allow(deprecated)]
+        let (root_uri, folders) = (params.root_uri.clone(), params.workspace_folders.clone());
+        let msg_roots = format!(
+            "index roots: {:?} (rootUri: {:?}, workspaceFolders: {:?}, cwd: {:?})",
+            roots, root_uri.map(|u| u.to_string()), folders.map(|f| f.iter().map(|x| x.uri.to_string()).collect::<Vec<_>>()),
+            std::env::current_dir().ok()
+        );
+        tracing::info!("{}", msg_roots);
         let index = Index::build(roots);
-        self.client
-            .log_message(MessageType::INFO, format!("indexed {} scripts, {} definitions", index.files.len(), index.ids.len()))
-            .await;
+        let msg = format!("{}; indexed {} scripts, {} definitions", msg_roots, index.files.len(), index.ids.len());
+        tracing::info!("{}", msg);
+        self.client.log_message(MessageType::INFO, msg).await;
         if let Ok(mut i) = self.index.write() {
             *i = index;
         }

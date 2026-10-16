@@ -23,14 +23,19 @@ export function activate(context: ExtensionContext) {
 
 function configureAndStartLanguageServer(context: ExtensionContext) {
 
-	const executableName = process.platform === 'win32' ? 'lsp.exe' : 'lsp';
+	// Packaged binaries: lsp.exe (Windows x64), lsp-linux-x64, lsp-darwin-arm64 (see .github/workflows/vsix.yml)
+	const executableName = process.platform === 'win32' ? 'lsp.exe' : `lsp-${process.platform}-${process.arch}`;
 
-	const pathToBin = context.asAbsolutePath(
+	let pathToBin = context.asAbsolutePath(
 		path.join('client', 'out', executableName)
 	);
+	if (!fs.existsSync(pathToBin)) {
+		// locally built extension with a single unsuffixed binary
+		pathToBin = context.asAbsolutePath(path.join('client', 'out', process.platform === 'win32' ? 'lsp.exe' : 'lsp'));
+	}
 
 	const pathToBinInDebug = context.asAbsolutePath(
-		path.join('..', 'server', 'target', 'debug', executableName)
+		path.join('..', 'server', 'target', 'debug', process.platform === 'win32' ? 'lsp.exe' : 'lsp')
 	);
 
 	// The executable bit can get lost when the server binary is packaged into the .vsix
