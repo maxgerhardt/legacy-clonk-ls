@@ -1367,7 +1367,7 @@
 },
 "AddCommand": {
 "arity_known": true,
-"desc": "Fügt ein Kommado in die Kommandoliste eines Objekts hinzu (an den Anfang, siehe auch `AppendCommand`). D.h. es wird ein Kommando hinzugefügt, welches das Objekt vor anderen vorher gegebenen Kommandos auszuführen hat (war vorher kein Kommando gesetzt, so entspricht AddCommand `SetCommand`) \n Für Kommando-Beschreibungen siehe `SetCommand`",
+"desc": "Adds a command to the top of the command stack of an object (also see `AppendCommand`). This command will be executed first, then the object will continue with the existing commands. If the command stack is empty, AddCommand does the same as  `SetCommand`.\nFor the list of commands see `SetCommand`",
 "documented": true,
 "params": [
 {
@@ -1416,7 +1416,7 @@
 "type": "int"
 },
 {
-"desc": "Bestimmt, wie beim Fehlschlag des Commands verfahren wird.\n\n  iBaseMode Name Beschreibung Fehlschlagsmeldung und CallFailed-Aufrufe Nächster Befehl 0 C4CMD_SilentSub Stiller Unterbefehl Nur wenn dies der letzte Befehl ist Schlägt fehl 3 C4CMD_Sub Unterbefehl Wenn der nächste Befehl keine Wiederholungen mehr hat oder dies der letzte Befehl ist Schlägt fehl 2 C4CMD_SilentBase Stiller Basisbefehl Nie Schlägt nicht fehl 1 C4CMD_Base Basisbefehl Immer Schlägt nicht fehl",
+"desc": "Determines the behaviour if the command fails.\n\n| iBaseMode | Name | Description | Failure messages and CallFailed calls | Next command |\n|---|---|---|---|---|\n| 0 | C4CMD_SilentSub | Silent command | Only if this is the last command | Fails |\n| 3 | C4CMD_Sub | Command | If the next command has no retries left or this is the last command | Fails |\n| 2 | C4CMD_SilentBase | Silent base command | Never | Does not fail |\n| 1 | C4CMD_Base | Base command | Always | Does not fail |",
 "name": "iBaseMode",
 "type": "int"
 }
@@ -1545,7 +1545,7 @@
 "type": "string"
 },
 {
-"desc": "Zusatzparameter für das Verhalten des Menüeintrags.\n Untere 7 Bits (0-127): Menüsymbol. Sie lassen sich nicht gleichzeitig verwenden.\n 0: Normal\n C4MN_Add_ImgRank = 1: Rangsymbol. Bei angegebenem idItem wird ggf. die Rank.png der Definition genutzt. iCount gibt die Ranghöhe an\n C4MN_Add_ImgIndexed = 2: Picturefacet, das um XPar1-fache Picturebreite nach rechts verschoben ist, wird verwendet. Damit lassen sich mehrere Menüsymbole innerhalb einer Definition unterbringen.\n C4MN_Add_ImgObjRank = 3: XPar1 gibt ein Objekt an, dessen Picture-Grafik mit Rang gezeichnet wird. Hat das Objekt keine Infosektion (und damit keinen Rang), so wird in Kontextmenüs dennoch ein entsprechender Leerraum gelassen. Ab CE.\n C4MN_Add_ImgObject = 4: XPar1 gibt ein Objekt an, dessen Picture-Grafik gezeichnet wird. Ab CE.\n C4MN_Add_ImgTextSpec = 5: Das Symbol wird in szCaption festgelegt und kann entweder eine normale ID, eine Portrait-Spezifikation in der Form \"Portrait:CLNK::00ff00::1\" oder eines der folgenden Symbole sein:\n  NameBeschreibung Ico:LockedPasswortsymbol Ico:LeagueLigasymbol Ico:GameRunningSymbol für \"Spiel läuft\" Ico:LobbySymbol für \"Lobby\" Ico:RuntimeJoinSymbol für \"Laufzeitbeitritt erlaubt\" Ico:FairCrewSymbol für \"Faire Crew\" Ico:SettlementSymbol für Siedlungspunkte \n C4MN_Add_ImgColor = 6: Die Besitzerfarbflächen im Symbol werden mit der in XPar1 angegebenen Farbe eingefärbt. \n C4MN_Add_ImgIndexedColor = 7: Picturefacet, das um XPar1-fache Picturebreite nach rechts verschoben ist, wird verwendet. Die Besitzerfarbflächen im Symbol werden mit der in XPar2 angegebenen Farbe eingefärbt. Kann nicht mit C4MN_Add_PassValue kombiniert werden.\n\n Zusätzliche Flags (können mit obrigen Bits kombiniert werden):\n C4MN_Add_PassValue = 128: XPar2 wird als Wertangabe benutzt, und überschreibt die Standardangabe (Wert der Definition idItem). Siehe auch iExtra von `CreateMenu`.\n C4MN_Add_ForceCount = 256: Wenn dieses Flag angegeben wird, wird auch ein iCount von 0 im Menü als Anzahl angezeigt (wie es zB. auch im Kaufmenü der Fall ist).\n Bei dieser Gelegenheit sei auch erwähnt, dass intern der Wert C4MN_Item_NoCount = 12345678 verwendet wird, wenn dieses Flag nicht angegeben ist, aber iCount 0 ist. D.h. auch, dass in dem seltenen Fall, dass iCount mit 12345678 angegeben wird, keine Anzahl angezeigt wird. \n C4MN_Add_ForceNoDesc = 512: Wenn dieses Flag angegeben wird, wird auf keinen Fall eine Beschreibung für den Menüeintrag angezeigt. Beschreibung (setzbar mit szInfoCaption) in dem Sinn, dass ein Tooltip angezeigt wird, wenn der Menüeintrag lange genug ausgewählt ist.",
+"desc": "Additional parameter determining the behavior of the menu entry.\nLower 7 bits (0-127): Menu entry icon. Can't be combined.\n0: Normal\nC4MN_Add_ImgRank = 1; Rank icon. With a specified idItem the Rank.png of the definition will be used if applicable. iCount determines the rank level.\nC4MN_Add_ImgIndexed = 2; The picture facet XPar1 times the picture width shifted to the right will be used. This may be used to store multiple icons in a single definition.\nC4MN_Add_ImgObjRank = 3: XPar1 is an object of which the picture including its rank will be used as icon. If the object doesn't have any info section (thus also no rank) in context menus a space for the rank symbol will be left out anyway. Since CE.\nC4MN_Add_ImgObject = 4: XPar1 is an object of which the picture is used as icon. Since CE.\nC4MN_Add_ImgTextSpec = 5: The symbol is defined in szCaption and can be either a normal ID, a portrait specification of the format \"Portrait:CLNK::00ff00::1\" or one of the following icons:\n| Name | Description |\n|---|---|\n| Ico:Locked | Password icon |\n| Ico:League | League icon |\n| Ico:GameRunning | Game running icon |\n| Ico:Lobby | Lobby icon |\n| Ico:RuntimeJoin | Runtime join allowed icon |\n| Ico:FairCrew | Fair crew icon |\n| Ico:Settlement | Settlement score icon |\n\nC4MN_Add_ImgColor = 6: The owner color area of the icon will be colorized with the color specified in XPar1.\nC4MN_Add_ImgIndexedColor = 7: The picture facet XPar1 times the picture width shifted to the right will be used. The owner color area of the icon will be colorized with the color specified in XPar2. Can not be combined with C4MN_Add_PassValue.\n\nAdditional flags (can be combined with those mentioned before):\nC4MN_Add_PassValue = 128: XPar2 is used as value and overrides the default value found (in the definition idItem). See also iExtra of `CreateMenu`.\nC4MN_Add_ForceCount = 256: If this flag is specified, also an iCount of 0 will be shown (like it is the case in the buying menu, for example).\nIt should also be mentioned that internally the value C4MN_Item_NoCount = 12345678 is used if this flag isn't specified but iCount is 0. This means that in the special case where iCount is passed as 12345678 the count won't be shown.\nC4MN_Add_ForceNoDesc = 512: If this flag is specified the description (set with szInfoCaption and shown as a tooltip) of the menu entry is suppressed completely, whereas in contrast passing 0 as szInfoCaption will show the description of idItem.",
 "name": "iExtra",
 "type": "int"
 },
@@ -1631,7 +1631,7 @@
 "type": "string"
 },
 {
-"desc": "Bestimmt, wie die Eingabe formatiert wird:\n  NameNummerBeschreibung C4MSGCMDR_Escaped0Eingabe wird in %s escaped eingesetzt. C4MSGCMDR_Plain1Eingabe wird direkt eingesetzt. C4MSGCMDR_Identifier2Es werden nur [a-z], [A-Z], [0-9], [_], [~], [+], [-] und Leerzeichen eingesetzt. \n Nur mit der C4MSGCMDR_Identifier-Restriction können Befehle über Ingame-Scripting hinzugefügt werden.",
+"desc": "Defines how the input is treated:\n| Name | Number | Description |\n|---|---|---|\n| C4MSGCMDR_Escaped | 0 | Input is escaped before substituting %s with it. |\n| C4MSGCMDR_Plain | 1 | Input is substituted for %s without any changes. |\n| C4MSGMCDR_Identifier | 2 | All characters except [a-z], [A-Z], [0-9], [_], [~], [+], [-] and space are stripped before substituting %s. |\n\nThrough the /script ingame-command only C4MSGCMDR_Identifier restricted commands are accepted and added.",
 "name": "iRestriction",
 "type": "int"
 }
@@ -1755,7 +1755,7 @@
 },
 "AppendCommand": {
 "arity_known": true,
-"desc": "Fügt ein Kommando der Kommandoliste eines Objekts am Ende hinzu. Das Objekt wird also das zuerst gegebene Kommando ausführen und sich danach automatisch dem mit AppendCommand hinzugefügten widmen.\n Für Kommando-Beschreibungen siehe `SetCommand`\n Bemerkung: Mit AppendCommand hinzugefügte Befehle werden nicht an gesteuerte Fahrzeuge weitergeleitet (siehe VehicleControl)",
+"desc": "Appends a command to the command stack of an object. The appended command will be executed after the current other commands.\nFor command descriptions see `SetCommand`\nNotice: commands set by AppendCommand are not transferred to controlled vehicles (see VehicleControl).",
 "documented": true,
 "params": [
 {
@@ -1992,7 +1992,7 @@
 },
 "BoundBy": {
 "arity_known": true,
-"desc": "Gibt iVal zurück, wenn der Wert innerhalb der Grenzen liegt (iVal >= iRange1 und iVal <= iRange2). Andernfalls wird die jeweils nächstliegende Grenze zurückgegeben.",
+"desc": "Returns iVal if it is within the given boundaries (iVal >= iRange1 and iVal <= iRange2). Otherwise returns the applicable limit.",
 "documented": true,
 "params": [
 {
@@ -2604,7 +2604,7 @@
 },
 "Collect": {
 "arity_known": true,
-"desc": "Sammelt ein Objekt auf. Der Befehl führt dieselben Funktionen aus, als wäre das Objekt durch den normalen Collection-Bereich des Objekts eingesammelt worden (z.B. RejectCollect, Prüfung auf Flagge/Flagge abnehmbar, Hit-Aufruf bei OCF_HitSpeed2, usw.). Die einzigen Unterschiede sind, dass keine Prüfung der Position von pItem auf den Entrance-Bereich von pTarget/this() gemacht wird, und dass pItem nicht auf OCF_Carryable geprüft wird.\nMit diesem Befehl lässt sich beispielsweise das Aufnehmen von Objekten aus Containern heraus realisieren. Wenn die Aufnahme fehlschlug (Beispielsweise durch den RejectCollect-Aufruf oder weil der Container voll war), gibt die Funktion 0 zurück. Ansonsten 1.",
+"desc": "Collects an object. This function performs the same events as they occur if the object is collected in the game through the Collection area (there will be a RejectCollect call, flag collection checks, hit calls, etc.) The only difference is that there will be no comparison of collection position and the collected item is not checked for the OCF_Carryable flag.\nUsing this function you can for example collect objects directly from a container. If the function fails (e.g. through a RejectCollect or a full target container) the function returns 0, otherwise 1.",
 "documented": true,
 "params": [
 {
@@ -2698,7 +2698,7 @@
 "type": "bool"
 }
 ],
-"remark": "Achtung: Ohne Angabe von true für returnAttached werden Objekte mit Prozedur ATTACH übersprungen. Dadurch stimmt das Ergebnis von `ContentsCount` (ohne Angabe von ID) nicht mit der Anzahl der über Contents() abfragbaren Objekte überein.",
+"remark": "Warning: Without specifying returnAttached as true objects with procedure ATTACH are skipped. Thus, the result of `ContentsCount` (without specifying an ID) does not match the number of objects retrievable via Contents().",
 "rtype": "object",
 "version": "4.6.5.0 CP"
 },
@@ -2853,7 +2853,7 @@
 "type": "object"
 },
 {
-"desc": "Additional information to be displayed about the currently selected entry. C4MN_ values are now also defined as constants: \n\t\t\t\t        KonstanteWertEffekt\n\t\t\t\t        C4MN_Extra_None0Nichts\n\t\t\t\t        C4MN_Extra_Components1Komponenten\n\t\t\t\t        C4MN_Extra_Value2Wert\n\t\t\t\t        C4MN_Extra_MagicValue3Wert als Magiewert. Dabei wird außerdem iExtraData als Vergleichswert angezeigt, z.B. \"50/100\".\n\t\t\t\t        C4MN_Extra_Info4Beschreibungstext sofort anzeigen\n\t\t\t\t        C4MN_Extra_ComponentsMagic5Komponenten und Magiewert\n\t\t\t\t        C4MN_Extra_LiveMagicValue6Wie C4MN_Extra_MagicValue, nur wird der Wert kontinuierlich aktualisiert.\n\t\t\t\t        C4MN_Extra_ComponentsLiveMagic7Wie C4MN_Extra_ComponentsMagic, nur wird der Wert kontinuierlich aktualisiert.",
+"desc": "Additional information to be displayed about the currently selected entry. C4MN_ values are now also defined as constants:\n| Constant | Value | Effect |\n|---|---|---|\n| C4MN_Extra_None | 0 | Nothing |\n| C4MN_Extra_Components | 1 | Components |\n| C4MN_Extra_Value | 2 | Value |\n| C4MN_Extra_MagicValue | 3 | Value as magic value. iExtraData is also displayed for comparison, e.g. \"50/100\". |\n| C4MN_Extra_Info | 4 | Display object description immediately |\n| C4MN_Extra_ComponentsMagic | 5 | Display components and magic value |\n| C4MN_Extra_LiveMagicValue | 6 | Same as C4MN_Extra_MagicValue but the value is updated continuously. |\n| C4MN_Extra_ComponentsLiveMagic | 7 | Same as C4MN_Extra_ComponentsMagic but the value is updated continuously. |",
 "name": "iExtra",
 "type": "int"
 },
@@ -2868,7 +2868,7 @@
 "type": "int"
 },
 {
-"desc": "Appearance of the menu. The following constants are defined (from CR): \n\t\t\t\t        KonstanteWertAussehen\n\t\t\t\t        C4MN_Style_Normal0Normal\n\t\t\t\t        C4MN_Style_Context1Kontextmenü\n\t\t\t\t        C4MN_Style_Info2Infomenü\n\t\t\t\t        C4MN_Style_Dialog3Dialog\n\t\t\t\t        C4MN_Style_EqualItemHeight128Kann mit C4MN_Style_Dialog kombiniert werden: Alle Einträge mit Icon im Dialogmenü bekommen die gleiche Höhe.",
+"desc": "Appearance of the menu. The following constants are defined (from CR):\n| Constant | Value | Appearance |\n|---|---|---|\n| C4MN_Style_Normal | 0 | Normal |\n| C4MN_Style_Context | 1 | Context menu |\n| C4MN_Style_Info | 2 | Info menu |\n| C4MN_Style_Dialog | 3 | Dialog |\n| C4MN_Style_EqualItemHeight | 128 | Can be combined with C4MN_Style_Dialog: all entries with an icon are drawn with the same height. |",
 "name": "iStyle",
 "type": "int"
 },
@@ -2974,7 +2974,7 @@
 },
 "CreateScriptPlayer": {
 "arity_known": true,
-"desc": "Initiiert den Beitritt eines Scriptspielers. Scriptspieler berhalten sich von der Scriptseite wie reguläre Spieler. Sie haben eine Stammcrew, ein Konto, Baupläne, Heimatbasismaterial, Verfeindungen, Teams, etc. Für diese Spieler wird jedoch regulär kein Sichtfenster geöffnet und sie lassen sich nicht von menschlichen Spielern steuern.\nScriptspieler können zum Beispiel verwendet werden, um KI-Gegner wie z.B. Bots in Hazard zu realisieren.",
+"desc": "Initializes a joining script player. Script players appear as regular players from the scripting point of view. They have a crew, wealth, build knowledge, home base material, hostility, teams, etc. However, script players do not have a game view port and they can not be controlled by human users.\nScript players can be used to create AI controlled opponent teams in special scenarios.",
 "documented": true,
 "params": [
 {
@@ -2993,7 +2993,7 @@
 "type": "int"
 },
 {
-"desc": "Bit mask composed of the following values: BitKonstanteBeschreibung\n\t\t\t\t0CSPF_FixedAttributesWenn gesetzt, tritt der Spieler garantiert mit den in den Parameter angegebenen Namen und Farbe bei. Ansonsten werden die Attribute bei Kollisionen geändert.\n\t\t\t\t1CSPF_NoScenarioInitWenn wahr, wird die Szenarieninitialisierung, also das Erzeugen von Heimatbasismaterial und Clonks, das Setzen der Baupläne nach Szenarienvorgaben, etc., nicht durchgeführt. Außerdem werden die globalen PreInitializePlayer- und InitializePlayer-Callbacks ans Szenarienscript und die Spielziel-, Regel- und Umweltobjekte nicht ausgeführt. Stattdessen wird ein InitializeScriptPlayer(Spielernummer, Team)-Callback als DefinitionCall (d.h. ohne `this`()-Objekt) auf der in idExtraData angegebenen Definition ausgeführt. Mit diesem Parameter lassen sich also spezialisierte Scriptspieler realisieren, die nicht gleichberechtigt mit menschlichen Spielern agieren.\n\t\t\t\t2CSPF_NoEliminationCheckWenn gesetzt, wird der Spieler nicht automatisch eliminiert, wenn er keine Crew mehr hat.\n\t\t\t\t3CSPF_InvisibleWenn gesetzt, ist der Spieler nicht in Spielerlisten wie zum Beispiel in der Lobby und im Verfeindungsmenü sichtbar.",
+"desc": "Bit mask composed of the following values:\n| Bit | Constant | Description |\n|---|---|---|\n| 0 | CSPF_FixedAttributes | If set, the player is guaranteed to join with the name and color specified in the parameters. Otherwise those preferences might be ignored in case of conflicts with other players' preferences. |\n| 1 | CSPF_NoScenarioInit | If true, the scenario initialization (i.e. placement of home base material, clonks, setting of build knowledge, etc.) is not performed for this player. Also, the global callbacks PreInitializePlayer and InitializePlayer to the scenario script and to goal, rule, and environment objects are not performed. Instead, the callback InitializeScriptPlayer(Player number, Team) is made to the object definition specified in idExtraData. The call is made as DefinitionCall (without `this`() object). Using this parameter you can create script-controlled AI players which do not receive the same standard treatment as user-controlled players. |\n| 2 | CSPF_NoEliminationCheck | If set, the player will not be eliminated automatically if its crew is empty. |\n| 3 | CSPF_Invisible | If set, the player will not show up in player lists such as in the lobby or hostility menu. |",
 "name": "dwFlags",
 "type": "int"
 },
@@ -3003,7 +3003,7 @@
 "type": "id"
 }
 ],
-"remark": "Scriptspieler treten in Netzwerkspielen genau wie reguläre Spieler verzögert bei. Das bedeutet, dass nach dem Aufruf von CreateScriptPlayer nicht sofort der Spieler zur Verfügung steht.\nWenn ein Script beispielsweise einen KI-Spieler ereugen will, so sollte die tatsächliche KI-Initialisierung erst im entsprechenden InitializePlayer-Callback erfolgen, wobei mit `GetPlayerType`() geprüft werden kann, ob es sich um einen Scriptspieler handelt.\nWird der Spieler schon zu Beginn des Szenarios gebraucht - also zum Beispiel als Gegner in einer Mission - so sollte stattdessen ein Spieler in den SavePlayerInfos.txt angelegt werden.",
+"remark": "As do normal players, script player join with a slight delay in network games. This means that following the call to CreateScriptPlayer the player will not be immediately available.\nThat means, actual initialization of that player should happen in the InitializePlayer callback which can use `GetPlayerType`() to check whether this is a script player.\nIf the script player really needs to be available even before normal player initialization - e.g. as opponent in a single player mission - you could create the player via the SavePlayerInfos.txt component.",
 "rtype": "bool",
 "version": "4.9.6.0 CR"
 },
@@ -3068,7 +3068,7 @@
 "type": "string"
 },
 {
-"desc": "Bit mask composed of additional settings. Possible values: \n\t\t\t\tBitKonstanteBeschreibung\n\t\t\t\t  0MSG_NoBreakWenn gesetzt, werden keine automatischen Zeilenumbruch bei langen Nachrichten eingefügt.\n\t\t\t\t  1MSG_BottomNur globale Nachrichten. Für Portraitnachrichten mit Dekorationsrahmen: Das Nachrichtenoffset gibt die Verschiebung zur unteren Bildschirmkante anstatt zur oberen Bildschirmkante an. Für nicht-Portraitnachrichten setzt das Flag die Nachricht etwas tiefer.\n\t\t\t\t  2MSG_MultipleWenn gesetzt, werden vorherige Nachrichten des gleichen Typs nicht gelöscht.\n\t\t\t\t  3MSG_TopNur globale Nachrichten. Für Portraitnachrichten mit Dekorationsrahmen: Das Nachrichtenoffset gibt die Verschiebung zur oberen Bildschirmkante an. Für nicht-Portraitnachrichten setzt das Flag die Nachricht etwas höher.\n\t\t\t\t  4MSG_LeftNur globale Nachrichten. Für Portraitnachrichten mit Dekorationsrahmen: Das Nachrichtenoffset gibt die Verschiebung zur linken Bildschirmkante an. Für nicht-Portraitnachrichten setzt das Flag die Nachricht etwas mehr nach links.\n\t\t\t\t  5MSG_RightNur globale Nachrichten. Für Portraitnachrichten mit Dekorationsrahmen: Das Nachrichtenoffset gibt die Verschiebung zur rechten Bildschirmkante an. Für nicht-Portraitnachrichten setzt das Flag die Nachricht etwas mehr nach rechts.\n\t\t\t\t  6MSG_HCenterNur globale Nachrichten. Die Nachricht wird auf mittlerer Bildschirmbreite angezeigt.\n\t\t\t\t  7MSG_VCenterNur globale Nachrichten. Die Nachricht wird auf mittlerer Bildschirmhöhe angezeigt.\n\t\t\t\t  8MSG_DropSpeechDie Nachricht wird beim ersten Vorkommen des Zeichens '$' abgeschnitten.\n\t\t\t\t  9MSG_WidthReliHSize gibt die Breite des Textes in Prozent zur relativen Größe des Viewports an. Nur bei globalen Nachrichten und Spielernachrichten.\n\t\t\t\t  10MSG_XReloffset_x gibt das X-Offset des Textes in Prozent zur relativen Größe des Viewports an. Nur bei globalen Nachrichten und Spielernachrichten. Empfohlene Werte: -50 bis +50.\n\t\t\t\t  11MSG_YReloffset_y gibt das y-Offset des Textes in Prozent zur relativen Größe des Viewports an. Nur bei globalen Nachrichten und Spielernachrichten. Empfohlene Werte: -70 bis +25.",
+"desc": "Bit mask composed of additional settings. Possible values:\n| Bit | Constant | Description |\n|---|---|---|\n| 0 | MSG_NoBreak | If set no automatic line breaks are made. |\n| 1 | MSG_Bottom | Only for global messages. For portrait messages with decoration frame: The position offset is relative to the bottom viewport edge instead f the top. For non-portrait messages the position is only shifted a bit downwards. |\n| 2 | MSG_Multiple | If set previous messages of the same type aren't removed. |\n| 3 | MSG_Top | Only for global messages. For portrait messages with decoration frame: The position offset is relative to the top viewport edge. For non-portrait messages the position is only shifted a bit upwards. |\n| 4 | MSG_Left | Only for global messages. For portrait messages with decoration frame: The position offset is relative to the left viewport edge. For non-portrait messages the position is only shifted a bit to the left. |\n| 5 | MSG_Right | Only for global messages. For portrait messages with decoration frame: The position offset is relative to the right viewport edge. For non-portrait messages the position is only shifted a bit to the right. |\n| 6 | MSG_HCenter | Only for global messages. The message is centered horizontally. |\n| 7 | MSG_VCenter | Only for global messages. The message is centered vertically. |\n| 8 | MSG_DropSpeech | The message is truncated at the first occurrence of '$'. |\n| 9 | MSG_WidthRel | iHSize specifies the text width in percent relative to the viewport width. Only for global and player messages. |\n| 10 | MSG_XRel | offset_x specifies the x-offset in percent relative to the viewport width. Only for global and player messages. Recommended values: -50 to +50. |\n| 11 | MSG_YRel | offset_y specifies the y-offset in percent relative to the viewport height. Only for global and player messages. Recommended values: -70 to +25. |",
 "name": "flags",
 "type": "int"
 },
@@ -3362,7 +3362,7 @@
 },
 "DoCon": {
 "arity_known": true,
-"desc": "Verändert die Fertigstellung eines Objekts. Die meisten Lebewesen und Bäume können dadurch vergrößert oder verkleinert werden. Gebäude können zu Baustellen zurückgesetzt und Baustellen vorwärts oder rückwärts gebaut werden.\n Sinkt die Fertigstellung eines Objekts auf oder unter 0, wird dieses gelöscht.",
+"desc": "Adjusts the completion value of an object. This affects the completion of construction sites or the growth of trees and living beings. If completion drops below 0, the object is removed.",
 "documented": true,
 "params": [
 {
@@ -3765,27 +3765,27 @@
 "type": "int"
 },
 {
-"desc": "Project-Id-Version: Clonk Doku\nReport-Msgid-Bugs-To: \nPOT-Creation-Date: 2022-06-05 18:33+0200\nPO-Revision-Date: 2021-04-04 18:46+0200\nLast-Translator: Markus Mittendrein \nLanguage-Team: English \nLanguage: en\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\nPlural-Forms: nplurals=2; plural=(n != 1);\nX-Generator: Lokalize 20.12.3",
+"desc": "",
 "name": "fX",
 "type": "int"
 },
 {
-"desc": "Project-Id-Version: Clonk Doku\nReport-Msgid-Bugs-To: \nPOT-Creation-Date: 2022-06-05 18:33+0200\nPO-Revision-Date: 2021-04-04 18:46+0200\nLast-Translator: Markus Mittendrein \nLanguage-Team: English \nLanguage: en\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\nPlural-Forms: nplurals=2; plural=(n != 1);\nX-Generator: Lokalize 20.12.3",
+"desc": "",
 "name": "fY",
 "type": "int"
 },
 {
-"desc": "Project-Id-Version: Clonk Doku\nReport-Msgid-Bugs-To: \nPOT-Creation-Date: 2022-06-05 18:33+0200\nPO-Revision-Date: 2021-04-04 18:46+0200\nLast-Translator: Markus Mittendrein \nLanguage-Team: English \nLanguage: en\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\nPlural-Forms: nplurals=2; plural=(n != 1);\nX-Generator: Lokalize 20.12.3",
+"desc": "",
 "name": "tX",
 "type": "int"
 },
 {
-"desc": "Project-Id-Version: Clonk Doku\nReport-Msgid-Bugs-To: \nPOT-Creation-Date: 2022-06-05 18:33+0200\nPO-Revision-Date: 2021-04-04 18:46+0200\nLast-Translator: Markus Mittendrein \nLanguage-Team: English \nLanguage: en\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\nPlural-Forms: nplurals=2; plural=(n != 1);\nX-Generator: Lokalize 20.12.3",
+"desc": "",
 "name": "tY",
 "type": "int"
 },
 {
-"desc": "Project-Id-Version: Clonk Doku\nReport-Msgid-Bugs-To: \nPOT-Creation-Date: 2022-06-05 18:33+0200\nPO-Revision-Date: 2021-04-04 18:46+0200\nLast-Translator: Markus Mittendrein \nLanguage-Team: English \nLanguage: en\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\nPlural-Forms: nplurals=2; plural=(n != 1);\nX-Generator: Lokalize 20.12.3",
+"desc": "",
 "name": "iSize",
 "type": "int"
 }
@@ -4540,7 +4540,7 @@
 },
 "Format": {
 "arity_known": true,
-"desc": "Setzt eine Zeichenkette aus verschiedenen Werten zusammen. Dabei wird szStr von vorne bis zum Ende nach mit '%' beginnenden Platzhaltern durchsucht, um diese dann durch die Parameter zu ersetzen.\n Das allgemeine Syntax für diese Platzhalter lautet:\n `%[Länge][.Präzision]Typ` Bis auf den Typ sind also alle Parameter optional. Der Typ gibt den Datentyp an, den der Parameter hat. Möglich sind folgende Werte: TypBedeutung dGanzzahl (int) xGanzzahl (int), hexadezimale Ausgabe (0123456789abcdef) XGanzzahl (int), hexadezimale Ausgabe (0123456789ABCDEF) iid (Bei IDs funktionieren die restlichen Parameter wie Länge und Präzision nicht!) sZeichenkette vBeliebig. Vor allem nützlich zur Fehlersuche.  Länge gibt eine Minimallänge an. Wenn der Wert kürzer ist, wird er rechtsbündig ausgerichtet und mit Leerzeichen aufgefüllt. Wird vor die Länge eine '0' gestellt, wird mit Nullen statt Leerzeichen aufgefüllt.\n \n Das Präzisionsfeld verhält sich je nach dem Parametertyp: Bei Ganzzahlen (d) gibt es die Minimalzahl der auszugebenden Zahlen an (der Rest wird mit Nullen aufgefüllt), während es bei Zeichenketten (s) die Maximalzahl der auszugebenden Zeichen angibt.",
+"desc": "Composes a string of several values. To do this, the specified string is scanned for '%' placeholders which are then replaced by the parameters.\nThe general syntax for these placeholders is:\n`%[length][.precision]type`Except for type all fields are optional. Type specifies the data type of the parameter to be expected. It is one of the following values:\n| Type | Meaning |\n|---|---|\n| d | Whole number (int) |\n| x | Whole number (int), hexadecimal representation (0123456789abcdef) |\n| X | Whole number (int), hexadecimal representation (0123456789ABCDEF) |\n| i | id (with ids, length and precision parameters do not apply) |\n| s | String |\n| v | Any. Primarily useful for debugging. |\n Length specifies the minimum number of characters used to display the value. If the value is shorter, the display is padded on the left with spaces, or with zeroes if there is a '0' before the length specification.\n\nThe meaning of the precision field varies with the data type: with integers (d) it specifies the minimum display length (the number is padded with zeroes at the beginning); while with strings (s) it specifies the maximum number of characters to be displayed.",
 "documented": true,
 "params": [
 {
@@ -5025,7 +5025,7 @@
 },
 "GetCategory": {
 "arity_known": true,
-"desc": "Fragt die Objektkategorie eines Objekts ab. Die Objektkategorie wird normalerweise über die DefCore gesetzt, und danach höchstens in seltenen Fällen mit `SetCategory` geändert. Sie bestimmt das allgemeine Verhalten eines Objekts und dessen Platzierung. Eine mit GetCategory abgefragt Kategorie kann mit dem &-Operator gegen eine C4D_-Konstante geprüft werden.",
+"desc": "Determines the category of an object. The category is usually specified in the DefCore but may in some cases haven been changed during the game by `SetCategory`. The category determines general placement and behaviour of the object. The returned category value can be compared with C4D_x constants using the & operator.",
 "documented": true,
 "params": [
 {
@@ -5059,7 +5059,7 @@
 "type": "int"
 }
 ],
-"remark": "Mit ``Format`(\"%c\")` lässt sich das Zeichen in einen String umwandeln.",
+"remark": "Using `(\"%c\")` the character can be converted back into a string.",
 "rtype": "int",
 "version": "4.9.1.0 GWE"
 },
@@ -5483,7 +5483,7 @@
 "type": "int"
 }
 ],
-"remark": "Über den Parameter iQueryVal können folgende Werte abgefragt werden:\n\n  iQueryValWert 0Effektnummer 1Name 2Priorität 3Timer-Intervall 4Befehlsziel 5Befehlsziel-ID 6Laufzeit des Effektes",
+"remark": "Using the parameter iQueryVal the following values can be retrieved:\n\n| iQueryVal | Value |\n|---|---|\n| 0 | Effect number |\n| 1 | Name |\n| 2 | Priority |\n| 3 | Timer interval |\n| 4 | Command target |\n| 5 | Command target id |\n| 6 | Duration of the effect |",
 "rtype": "any",
 "version": "4.9.5.0 CE"
 },
@@ -5687,7 +5687,7 @@
 "type": "object"
 }
 ],
-"remark": "Aufgrund der Komplexität der Spielwelt von Clonk ist es nicht immer möglich, den tatsächlichen Schadensverursacher in Kettenreaktionen korrekt ausfindig zu machen. Zur Schadensverfolgung speichert jedes Objekt einen steuernden Spieler, der die Spielernummer des Spielers angibt, der ein Objekt zuletzt kontrolliert bzw. geworfen, geschoben, abgeschossen, etc. hat (für Details siehe `GetController`). Dieses Feld wird benutzt, um den Schaden erzeugenden Spieler zu ermitteln:\n Bei Objekttreffern der steuernde Spieler des geworfenen Objektes. Dieser wird für Gegenstände automatisch beim Einsammeln gesetzt. Bei Clonk-zu-Clonk-Kämpfen gilt direkt der steuernde Spieler des Kampfgegners als Schadensverursacher. Das ist im Normalfall der Besitzer. Bei Feuer gilt der Controller des ursprünglichen Verursachers des Feuers, also dem aufrufenden Objekt in `Incinerate`()-Aufrufen. Der Verursacher wird durch die Entzündketten weitergetragen, unabhängig von Besitzern oder steuernden Spielern der brennenden Objekte. Zündet also zum Beispiel Spieler A einen Clonk von Spieler B an und selbiger entzündet einen Clonk von Spieler C, so gelten beide Feuer als von Spieler A verursacht. Der Schadensverursacher eines Clonks wird aumatisch auf NO_OWNER (kein Spieler) zurück gesetzt, wenn der Clonk eine Aktivität ausführt, für die nicht ObjectDisabled=1 gesetzt ist (zum Beispiel \"Walk\").\n Selbst verursachter Schaden setzt das Feld nur dann auf den eigenen Spieler, wenn es vorher NO_OWNER war. Das verhindert, dass ein Spieler durch schnellen Selbstmord anderen Spielern Punkte wegnehmen kann. Wenn man unten herausfällt, gilt also derjenige als Mörder, der zuletzt Schaden verursacht hat. Wurde der Clonk mit einem Steintreffer herunter geschleudert, gilt in dem Fall der Steinwerfer.",
+"remark": "Because of the complexity of the Clonk game world it is not always possible to find the actual cause of damage in chain reactions. To track damage, every object stores a controlling player: the number of the player who last controlled, threw, pushed, shot, etc. the object (for details see `GetController`). This field is used to determine the player causing damage:\n- Object hits: the controlling player of the thrown object. For items this is set automatically when they are collected. In clonk-to-clonk fights the controlling player of the opponent counts directly as the cause, which is normally the owner.\n- Fire: the controller of whoever originally caused the fire, i.e. the calling object of `Incinerate` calls. The cause is passed on through chains of ignition, regardless of owners or controlling players of the burning objects. If, for example, player A sets fire to a clonk of player B, which then ignites a clonk of player C, both fires count as caused by player A.\n\nThe damage cause of a clonk is automatically reset to NO_OWNER (no player) when the clonk performs an activity that doesn't have ObjectDisabled=1 set (for example \"Walk\").\nSelf-inflicted damage only sets the field to the clonk's own player if it was NO_OWNER before. This prevents a player from taking points away from other players by quickly committing suicide. If a clonk falls out at the bottom, the last player who caused damage counts as the killer; if the clonk was knocked down by a thrown rock, the rock thrower counts.",
 "rtype": "int",
 "version": "4.9.6.0 CR"
 },
@@ -6119,7 +6119,7 @@
 },
 "GetPath": {
 "arity_known": true,
-"desc": "Searches for a path from start point to end point using the pathfinding algorithm as used by clonks and returns a map with its waypoints and length. Returns nil if no path was found. The returned map is structured like this: \n            SchlüsselDatentypBeschreibung\n            LengthintLänge des gefundenen Weges, wie bei `GetPathLength`\n            WaypointsarrayArray mit Wegpunkten\n           The waypoints are structured like this: \n            SchlüsselDatentypBeschreibung\n              XintX-Koordinate des Wegpunkts\n              YintY-Koordinate des Wegpunkts\n              TransferTargetobjectTransferzielobjekt. nur gesetzt, falls vorhanden.",
+"desc": "Searches for a path from start point to end point using the pathfinding algorithm as used by clonks and returns a map with its waypoints and length. Returns nil if no path was found. The returned map is structured like this:\n| Key | Data type | Description |\n|---|---|---|\n| Length | int | Length of the found path, same as returned by`GetPathLength` |\n| Waypoints | array | Array containing waypoints |\n The waypoints are structured like this:\n| Key | Data type | Description |\n|---|---|---|\n| X | int | X coordinate of the waypoint |\n| Y | int | Y coordinate of the waypoint |\n| TransferTarget | object | Transfer target. only set if present. |",
 "documented": true,
 "params": [
 {
@@ -6304,7 +6304,7 @@
 },
 "GetPlayerType": {
 "arity_known": true,
-"desc": "Returns the type of a player. Possible values are: KonstanteWertBeschreibung\n                      C4PT_User1Vom Benutzer gesteuerter Spieler\n                      C4PT_Script2Scriptgeesteuerter Spieler; zum Beispiel KI-Spieler.",
+"desc": "Returns the type of a player. Possible values are:\n| Constant | Value | Description |\n|---|---|---|\n| C4PT_User | 1 | User-controlled player |\n| C4PT_Script | 2 | Script-controlled player; i.e. AI player. |",
 "documented": true,
 "params": [
 {
@@ -6373,12 +6373,12 @@
 "type": "int"
 },
 {
-"desc": "Control the name is needed of. Possible values: \n\t\t\t\t\t\tNameWert\n\t\t\t\t\t\tCON_CursorLeft0\n\t\t\t\t\t\tCON_CursorToggle1\n\t\t\t\t\t\tCON_CursorRight2\n\t\t\t\t\t\tCON_Throw3\n\t\t\t\t\t\tCON_Up4\n\t\t\t\t\t\tCON_Dig5\n\t\t\t\t\t\tCON_Left6\n\t\t\t\t\t\tCON_Down7\n\t\t\t\t\t\tCON_Right8\n\t\t\t\t\t\tCON_Menu9\n\t\t\t\t\t\tCON_Special10\n\t\t\t\t\t\tCON_Special211",
+"desc": "Control the name is needed of. Possible values:\n| Name | Value |\n|---|---|\n| CON_CursorLeft | 0 |\n| CON_CursorToggle | 1 |\n| CON_CursorRight | 2 |\n| CON_Throw | 3 |\n| CON_Up | 4 |\n| CON_Dig | 5 |\n| CON_Left | 6 |\n| CON_Down | 7 |\n| CON_Right | 8 |\n| CON_Menu | 9 |\n| CON_Special | 10 |\n| CON_Special2 | 11 |",
 "name": "iCon",
 "type": "int"
 },
 {
-"desc": "Wenn true, wird die kurze Version der Taste zurückgegeben. (Beispiel: statt \" |\" wird \"<\" zurückgegeben.)",
+"desc": "If true, the short name of the key is returned. (E.g. \"<\" instead of \"< > |\")",
 "name": "fShort",
 "type": "bool"
 }
@@ -6538,7 +6538,7 @@
 },
 "GetPlrViewMode": {
 "arity_known": true,
-"desc": "Determines the current view mode of a player. The function returns the following values: \n            0: Cursor - Die Sicht des Spielers folgt dem aktuell selektierten Clonk (siehe `GetCursor`)\n            1: Target - Die Sicht folgt einem anderen Objekt, welches durch den Befehl `SetPlrView` im Script gesetzt wurde. Siehe auch `GetPlrView`.\n            2: Scroll - Der Spieler bewegt seine Sicht unabhängig von der Position eines Objekts. Dies geschieht, wenn der Spieler die Maus an den Rand seines Sichtbereichs zieht.",
+"desc": "Determines the current view mode of a player. The function returns one of the following values:\n- 0: Cursor - the player's view follows the currently selected clonk (see `GetCursor`)\n- 1: Target - the view follows another object that was set by `SetPlrView` in a script. See also `GetPlrView`.\n- 2: Scroll - the player moves the view independently of any object's position. This happens when the player moves the mouse to the edge of the viewport.",
 "documented": true,
 "params": [
 {
@@ -6787,7 +6787,7 @@
 "type": "int"
 }
 ],
-"remark": "The function will return a value depending on what has been requested: \n\t\t\t\t\t\t\tiWhatRückgabe\n\t\t\t\t\t\t\t0Jahr\n\t\t\t\t\t\t\t1Monat (1 = Januar, 2 = Februar usw.)\n\t\t\t\t\t\t\t2Wochentag (0 = Sonntag, 1 = Montag usw.)\n\t\t\t\t\t\t\t3Tag\n\t\t\t\t\t\t\t4Stunde\n\t\t\t\t\t\t\t5Minute\n\t\t\t\t\t\t\t6Sekunde\n\t\t\t\t\t\t\t7Millisekunde",
+"remark": "The function will return a value depending on what has been requested:\n| iWhat | Return value |\n|---|---|\n| 0 | Year |\n| 1 | Month (1 = January, 2 = February, etc.) |\n| 2 | Day of the wekk (0 = Sunday, 1 = Monday, etc.) |\n| 3 | Day |\n| 4 | Hour |\n| 5 | Minute |\n| 6 | Second |\n| 7 | Millisecond |",
 "rtype": "int",
 "version": "4.9.1.0 GWE"
 },
@@ -6842,12 +6842,12 @@
 "documented": true,
 "params": [
 {
-"desc": "Kann einer der folgenden Werte sein:\n  NameNummer TEAM_Custom1 TEAM_Active2 TEAM_AllowHostilityChange3 TEAM_Dist4 TEAM_AllowTeamSwitch5 TEAM_AutoGenerateTeams6 TEAM_TeamColors7",
+"desc": "May be one of the following values:\n| Name | Number |\n|---|---|\n| TEAM_Custom | 1 |\n| TEAM_Active | 2 |\n| TEAM_AllowHostilityChange | 3 |\n| TEAM_Dist | 4 |\n| TEAM_AllowTeamSwitch | 5 |\n| TEAM_AutoGenerateTeams | 6 |\n| TEAM_TeamColors | 7 |",
 "name": "iConfig",
 "type": "int"
 }
 ],
-"remark": "Bei TEAM_Dist werden die Lobby-Teameinstellungen zurückgegeben. Dort muss jedoch unterschieden werden, ob TEAM_AutoGenerateTeams aktiviert ist, denn je nach Einstellung sind andere Lobby-Einstellungen verfügbar.\n Für TEAM_AutoGenerateTeams = true werden die Konstanten\n TEAMDIST_Free (0, freie Teamwahl),\n TEAMDIST_Host (1, Host stellt ein)\noder 2 (keine entspr. Konstante, keine Teams) zurückgegeben.\nOhne TEAM_AutoGenerateTeams (also in der Regel bei festen Teams) werden\n TEAMDIST_Free (0),\n TEAMDIST_Host (1),\n TEAMDIST_Random (2, Zufall)\n oder TEAMDIST_RandomInv (3, zufällig und unsichtbar)\n zurückgegeben.",
+"remark": "For TEAM_Dist the settings from the lobby will be returned. In this case it must be distinguished if TEAM_AutoGenerateTeams has been enabled or disabled because it determines the available options.\nWith TEAM_AutoGenerateTeams = true the possible return values are\nTEAMDIST_Free (0, free team choice),\nTEAMDIST_Host (1, teams chosen by host)\nor 2 (without according constant, no teams).\nWith TEAM_AutoGenerateTeams = false (the norm for predefined teams) the return values are\nTEAMDIST_Free (0),\nTEAMDIST_Host (1),\nTEAMDIST_Random (2, random teams)\nor TEAMDIST_RandomInv (3, random and invisible in the lobby).",
 "rtype": "int",
 "version": "4.9.6.0 CR"
 },
@@ -6948,7 +6948,7 @@
 },
 "GetValue": {
 "arity_known": true,
-"desc": "Gibt einen Objekt- oder Definitionswert zurück. Bei angegebenem idDef wird der Definitionswert zurückgegeben, ansonsten der Objektwert von pObj oder dem aufrufenden Objekt bei pObj=0.\nEin Objektwert berechnet sich folgendermaßen: Bei angegebenem pObj wird zunächst geprüft, ob eine CalcValue-Funktion im Script des Objekttyps von pObj vorhanden ist, und gegebenenfalls ausgewertet. Ansonsten wird der Definitionswert (siehe nächster Absatz) verwendet. Unabhängig davon wird der Wert des Objekts immer der Fertigstellung (GetCon()/100) multipliziert. Tote Lebewesen (GetCategory()&OCF_Living() && !GetAlive()) haben immer den Wert 0.\nDer Definitionswert wird folgendermaßen ermittelt: Ist eine CalcDefValue-Funktion im Script vorhanden, wird diese ausgewertet. Ansonsten wird eine Wertüberladung aus der Scenario.txt verwendet. Ist diese ebenfalls nicht vorhanden, wird der in der DefCore angegebene Wert benutzt.",
+"desc": "Determines the value of an object. With idDef specified, the standard value of the original object definition is returned, otherwise the current value of the specified object (pObj) or the calling object if pObj is 0.\nAn object's value is determined as follows: with pObj specified it is first checked whether the CalcValue function is defined in the object's script and if so, it is evaluated. Otherwise, the definition value is used (see below). The resulting value is then reduced according to the object's completion.\nDead animals or clonks always have value 0.\nThe definition value is determined as follows: if the function CalcDefValue is defined in the definition script, it is evaluated. Otherwise, the value overload from Scenario.txt is used, if present. Otherwise, the standard value from DefCore is used.",
 "documented": true,
 "params": [
 {
@@ -7002,7 +7002,7 @@
 "type": "int"
 },
 {
-"desc": "Specifies which value should be retrieved. The following values are available: \n\t\t\t\t\t\t\tNameWertBeschreibung\n\t\t\t\t\t\t\tVTX_X0X-Koordinate des Vertex'\n\t\t\t\t\t\t\tVTX_Y1Y-Koordinate des Vertex'\n\t\t\t\t\t\t\tVTX_CNAT2Ausrichtung des Vertex'\n\t\t\t\t\t\t\tVTX_Friction3Reibung des Vertex'",
+"desc": "Specifies which value should be retrieved. The following values are available:\n| Name | Value | Description |\n|---|---|---|\n| VTX_X | 0 | X coordinate of the vertex |\n| VTX_Y | 1 | Y coordinate of the vertex |\n| VTX_CNAT | 2 | Direction of the vertex |\n| VTX_Friction | 3 | Friction of the vertex |",
 "name": "iValueToGet",
 "type": "int"
 },
@@ -7435,7 +7435,7 @@
 },
 "Inside": {
 "arity_known": true,
-"desc": "Gibt TRUE zurück, wenn iVal >= iRange1 und iVal <= iRange2 ist.",
+"desc": "Returns true, if iVal >= iRange1 and iVal <= iRange2.",
 "documented": true,
 "params": [
 {
@@ -7493,7 +7493,7 @@
 },
 "Jump": {
 "arity_known": true,
-"desc": "Veranlasst das Objekt dazu, zu springen. Dabei gelten sämtliche Beschränkungen, die auch bei Ansteuerung über die Tastatur gelten: Das Objekt kann nur springen, wenn es gerade steht (seine Action die Procedure \"WALK\" hat).\n Im Wasser wird die Action \"Dive\" aktiviert.\n Die Funktion gibt zurück, ob die Aktion erfolgreich durchgeführt wurde.",
+"desc": "Makes an object jump. The same limitations apply as they would with a keyboard controlled jump: the object can jump only from the WALK activity or SWIM activity (jumping from the latter will cause a dive jump).\nReturns whether the jump was successfully initiated.",
 "documented": true,
 "params": [
 {
@@ -7566,7 +7566,7 @@
 },
 "LaunchLightning": {
 "arity_known": true,
-"desc": "Erzeugt einen Blitz. Dieser bewegt sich von der Position (iX, iY) mit der angegebenen Geschwindigkeit fort. Dabei geben iXRange/iYRange an, wie sehr der Blitz von diesem vorgegegebenen Weg abweichen kann (mit iXRange = iYRange = 0 würde der Blitz schnurgerade verlaufen). iXRange/iYRange sind sozusagen ein Maß für die \"Zackigkeit\" eines Blitzes.\n Die Position muss auch bei lokalem Aufruf in globalen Koordinaten angegeben werden.",
+"desc": "Creates a bolt of lightning. This will then move from the starting position (iX, iY) at the specified speed and the specified deviation (iXRange, iYRange). Setting the deviation values to 0 would create a straight, linear bolt.\nCoordinates are global, even in local calls.",
 "documented": true,
 "params": [
 {
@@ -7653,12 +7653,12 @@
 "type": "string"
 },
 {
-"desc": "Flags telling which parts of the section should be saved to later be restored when returning to the current section. The following flags are defined: \n\t\t\tNameWertBeschreibung\n\t\t\tC4SECT_SaveLandscape1Veränderungen in der Landschaft werden gespeichert.\n\t\t\tC4SECT_SaveObjects2Objekte werden gespeichert.\n\t\t\tC4SECT_KeepEffects4Globale Effekte werden gespeichert.",
+"desc": "Flags telling which parts of the section should be saved to later be restored when returning to the current section. The following flags are defined:\n| Name | Value | Description |\n|---|---|---|\n| C4SECT_SaveLandscape | 1 | Changes in the landscape should be saved. |\n| C4SECT_SaveObjects | 2 | Objects should be saved. |\n| C4SECT_KeepEffects | 4 | Global Effects are being saved. |",
 "name": "dwFlags",
 "type": "int"
 }
 ],
-"remark": "Objekte sollten vor dem Wechsel mit `SetObjectStatus` deaktiviert und nach dem Wechsel wieder reaktiviert werden.\n Wichtig zu beachten ist, dass die Objekte nach dem Laden der neuen Sektion immer noch die Koordinaten haben, die sie in der alten Sektion hatten. Deshalb kann es vorkommen, dass Objekte nach dem Laden gelöscht werden, weil sie nun außerhalb der Landschaft liegen. Man musst also möglicherweise die Position der Objekte vor dem Sektionswechsel neu setzen, um dies zu verhindern.",
+"remark": "Objects should be deactivated before changing the section via `SetObjectStatus` and reactivated afterwards.\nIt's important to keep in mind that the object position will stay the same after changing the section. Thus, it is possible that objects are being removed after changing the section because they are then positioned outside of the landscape borders. To mitigate this, it may be required to change the object positions before changing the section.",
 "rtype": "bool",
 "version": "4.9.6.0 CR"
 },
@@ -7779,7 +7779,7 @@
 },
 "MakeCrewMember": {
 "arity_known": true,
-"desc": "Fügt ein Objekt (z.B. einen Clonk) der Crew eines Spielers hinzu. Das Objekt muss die CrewMember-Eigenschaft in der DefCore gesetzt haben.\n Gibt 1 zurück, wenn das Objekt erfolgreich der Crew hinzugefügt wurde.",
+"desc": "Adds an object (usually a clonk) to the crew of a player. The object must have the CrewMember property set in the DefCore.\nReturns 1 if the object was added successfully.",
 "documented": true,
 "params": [
 {
@@ -7896,7 +7896,7 @@
 "type": "any"
 }
 ],
-"remark": "Durch Verwendung des Zeichens \"|\" kann ein Zeilenvorschub erreicht werden. \"Test\" gibt \"Test\" farbig aus (AA: Transparenz, RR: Rot-, GG: Grün. BB: Blauanteil; hexadezimale Angaben). {{C4ID}} zeigt ein Bild des Objektes mit der ID C4ID; durch Angabe von Zahlen können verschiedene Teile der Grafik verwendet werden, z.B. {{C4ID:2}}.",
+"remark": "By using the character \"|\" a line break can be made. \"<c AARRGGBB>Test</c>\" results in \"Test\" printed in color (AA: transparency, RR: red, GG: green, BB blue; using hexadecimal notation). {{C4ID}} is printed as the picture of object with ID C4ID; by specifying a number, different parts of the picture graphics can be selected, e.g. {{C4ID:2}}.",
 "rtype": "bool",
 "version": "4.6.5.0 CP"
 },
@@ -8049,7 +8049,7 @@
 },
 "ObjectCall": {
 "arity_known": true,
-"desc": "Ruft die öffentliche Funktion szFunction in pObj auf. Stattdessen sollte die neue Syntax [pObj]->[szFunction]() oder [pObj]->[idObj]::[szFunction]() genutzt werden.",
+"desc": "Calls a public function in the target object, You should use the new syntax [pObj]->[szFunction]() or [pObj]->[idObj]::[szFunction]() instead.",
 "documented": true,
 "params": [
 {
@@ -8888,7 +8888,7 @@
 "type": "bool"
 }
 ],
-"remark": "Beim Löschen eines Objekts werden viele interne Zeiger gelöscht, und das Objekt selber wird ungültig. Darum sollte der Zeiger auf dieses Objekt (z.B. innerhalb von threadlokalen Variablen) anschließend nicht mehr benutzt werden. Wenn sich ein Objekt selber entfernt, sollte die Funktion sofort mit return() beendet werden.\n Wenn sich das Objekt zu diesem Zeitpunkt in einer Crew befindet, wird das assoziierte Infoobjekt in der Crew nicht als getötet markiert. Das heißt, ein darauffolgender `MakeCrewMember`()-Aufruf kann wieder in demselben Mannschaftsmitglied resultieren. Um dies zu verhindern, sollte das Objekt zuvor mit `Kill`() getötet werden.",
+"remark": "When removing an object, numerous internal references to the object are cleared and any pointer to the object will become invalid. If you have stored a pointer to this object (e.g. in thread local script) you must no longer use this pointer after deletion of the object. If an object removes itself by script it should not execute any more script commands following the removal. The deleting function should immediately end with return().\nIf the object is a valid crew member at the time of removal, the associated info object in the crew list will not be marked as 'killed', meaning a subsequent call to `MakeCrewMember`() might reuse the same crew info. To properly kill a clonk until the end of a round use `Kill`().",
 "rtype": "bool",
 "version": "4.6.5.0 CP"
 },
@@ -8967,7 +8967,7 @@
 "type": "object"
 }
 ],
-"remark": "Objekte werden primär nach den Hauptkategorien (C4D_StaticBack bis C4D_Object), und sekundär nach ihrer Definition sortiert (erstmals auftauchende Definitionen kommen ans Ende, werden also ganz oben gezeichnet). Bei C4D_StaticBack-Objekten entfällt die Sortierung nach Definition.\nDie Sortierung findet intern erst am Ende des Frames statt.",
+"remark": "Objects are primarily sorted by the main categories (C4D_StaticBack through C4D_Object) and secondarily by their object definition (newly placed definitions are placed at the end of the list, so they are drawn at the very top). C4D_StaticBack objects, however, are not sorted by definition.\nInternal sorting is always done at the end of each executed frame.",
 "rtype": "void",
 "version": "4.9.1.0 GWE"
 },
@@ -9070,7 +9070,7 @@
 },
 "ScrollContents": {
 "arity_known": true,
-"desc": "Rotiert den Inhalt eines Objekts. Dabei wird immer genau ein Objekt weiter gescrollt (im Gegensatz zu `ShiftContents`). Es wird außerdem kein ControlContents aufgerufen. \n Zurückgegeben wird ein Pointer auf das Objekt, das sich nach der Rotation am Anfang der Inhaltsliste befindet.",
+"desc": "Shifts the contents of an object. This will always shift by exactly one object (as opposed to `ShiftContents`). No call to ControlContents is made. Returns a pointer to the object at the front of the contents list after the shift.",
 "documented": true,
 "params": [
 {
@@ -9466,7 +9466,7 @@
 "type": "int"
 }
 ],
-"remark": "Es sind folgende Kommandos definiert:  szCommandpTargetiX,iYpTarget2iDataBeschreibung AcquireNull0,0Behälter ignorierenObjekttyp (id)Objekt von Objekttyp beschaffen, wenn nötig kaufen. Material im angegebenen Behälter (Target2) wird bei der Suche ignoriert. ActivateZielobjektZielobjekt aktivieren (aus Gebäude herausholen). ActivateNull0,0ZielobjektHolen-Menü für Inhalt des Zielobjekts öffnen. ActivateNullAnzahl,0ZielobjektObjekttyp (id)Anzahl Objekte von Objekttyp in Zielobjekt aktivieren. AttackZielobjektZielobjekt angreifen. BuildZielobjektZielobjekt bauen und anschließend mit Energie versorgen. BuyNull0,0NullObjekttyp (id)Objekt von Objekttyp in nächstgelegener Basis kaufen. BuyBasisAnzahl,0NullObjekttyp (id)Anzahl Objekte von Objekttyp in Basis kaufen. BuyBasisKaufen-Menü für angegebene Basis öffnen. CallObjektPar(1),Par(2)Par(3)Funktion (string)Funktion im Objekt-Script von Objekt aufrufen, Par(0) ist dabei das aufrufende Objekt. Schlägt das Kommando fehl, weil untergeordnete Befehle nicht ausgeführt werden konnten, wird stattdessen FunktionFailed aufgerufen. ChopZielobjektZielobjekt fällen. ConstructBauauftragsmenü öffnen. ConstructNull0,0NullObjekttyp (id)An der nächstmöglichen Zielposition Baustelle errichten. ConstructNullZielpositionNullObjekttyp (id)An der Zielposition Baustelle errichten und anschließend bauen. ConstructZielobjektZielposition [opt]NullObjekttyp (id)Zielobjekt helfen, die Baustelle zu errichten (der Clonk baut mit, sobald die Baustelle errichtet wurde) DigNullZielpositionZur Zielposition graben. DropErstes getragenes Objekt sofort ablegen. DropNullZielpositionErstes getragenes Objekt an Zielposition ablegen. DropZielobjektZielpositionZielobjekt einsammeln und an Zielposition ablegen. EnergyZielobjektZielobjekt vom nächsten Versorger mit Energie versorgen. EnergyZielobjekt0,0VersorgerZielobjekt vom Versorger mit Energie versorgen. EnterZielobjektDas Zielobjekt betreten. ExitDen aktuellen Behälter verlassen. FollowZielobjektDem Zielobjekt folgen (dauerhaft). GetZielobjektZielobjekt einsammeln (ggf. ausgraben). GetNullAnzahl,0ZielobjektObjekttyp (id)Anzahl Objekte von Objekttyp aus Zielobjekt holen. Ab 4.9.8.3. GrabZielobjektOffsetDas Zielobjekt am Offset zur Objektmitte anfassen. HomeZurück zur nächstgelegenen Heimatbasis. JumpIn aktuelle Richtung springen. JumpNullZielpositionIn Richtung der Zielposition springen. MoveToZielobjekt0,0NullKeine Anpassung? (bool)Zur Position des Zielobjekts bewegen. iData true um die Koordinaten nicht an die Landschaftsform anzupassen. MoveToNullZielpositionNullKeine Anpassung? (bool)Zur Zielposition bewegen. iData true um die Koordinaten nicht an die Landschaftsform anzupassen. NoneAktuelle Befehle löschen. PushToZielobjektZielpositionZielobjekt an Zielposition schieben. PushToObjekt0,0ZielobjektObjekt in Zielobjekt schieben. PutZielobjektErstes getragenes Objekt im Zielobjekt ablegen. PutZielobjektAnzahl,0Die angegebene Anzahl getragener Objekte im Zielobjekt ablegen. Ab 4.9.8.3. PutZielobjekt0,0ObjektObjekt einsammeln und im Zielobjekt ablegen. PutZielobjekt0,0NullObjekttyp (id)Getragenes Objekt von Objekttyp im Zielobjekt ablegen. PutZielobjektAnzahl,0NullObjekttyp (id)Die angegebene Anzahl getragener Objekte von Objekttyp im Zielobjekt ablegen. Ab 4.9.8.3. SellNull0,0Objekt2Objekttyp (id)Objekt von Objekttyp in nächstgelegener Basis verkaufen. Bei angegebenem Objekt2 wird zuerst dieses verkauft, wenn es in der Basis ist. SellBasisAnzahl,0Objekt2Objekttyp (id)Anzahl Objekte von Objekttyp in Basis verkaufen. Bei angegebenem Objekt2 wird zuerst dieses verkauft, wenn es in der Basis ist. SellBasisVerkaufen-Menü für angegebene Basis öffnen. ThrowErstes getragenes Objekt sofort werfen. ThrowNullZielpositionErstes getragenes Objekt auf Zielposition werfen. ThrowZielobjektZielpositionZielobjekt einsammeln und an Zielposition werfen. UnGrabAktuell angefaßtes Objekt loslassen. WaitNull0,0NullFramesAnzahl Frames/Ticks warten. \n Um das Holen-Menü für ein Objekt zu öffnen, muss der Data-Parameter auf true gesetzt sein. Beispiel: `func ControlLeft(object byObj) { SetCommand(byObj, \"Get\", `this`, 0, 0, 0, true); }`",
+"remark": "The following commands are defined:\n| szCommand | pTarget | iX,iY | pTarget2 | iData | Description |\n|---|---|---|---|---|---|\n| Acquire | Null | 0,0 | Ignore container | Object type (id) | Type of object to be acquired. May be bought at the home base if necessary. Material contained in the specified container (Target2) is to be ignored in the search. |\n| Activate | Target object |  |  |  | Activate the target object (exit from its container). |\n| Activate | Null | 0,0 | Target object |  | Open the Get menu for the contents of the target object. |\n| Activate | Null | Number,0 | Target object | Object type (id) | Activate n objects of the specified type in the target object. |\n| Attack | Target object |  |  |  | Attack the target object. |\n| Build | Target object |  |  |  | Build the target object and supply it with energy when done. |\n| Buy | Null | 0,0 | Null | Object type (id) | Buy an object of the specified type at the closest friendly home base. |\n| Buy | Basis | Number,0 | Null | Object type (id) | Buy n objects of the specified type at the home base. |\n| Buy | Basis |  |  |  | Open the Buy menu for the specified home base. |\n| Call | Object | Par(1),Par(2) | Par(3) | Function (string) | Call Function in the object script. Par(0) will be the calling object. If the command fails because underlaying commands have failed, the function FunctionFailed is called instead. |\n| Chop | Target object |  |  |  | Fell the target object object (tree). |\n| Construct |  |  |  |  | Open the Construction menu. |\n| Construct | Null | 0,0 | Null | Object type (id) | Create a construction site at the closest possible position. |\n| Construct | Null | Target position | Null | Object type (id) | Create a construction site at the target position and start building. |\n| Construct | Target object | Target position [opt] | Null | Object type (id) | Help the target object with the construction (help building as soon as the site is created). |\n| Dig | Null | Target position |  |  | Dig towards the target position. |\n| Drop |  |  |  |  | Immediately drop the first object in the inventory. |\n| Drop | Null | Target position |  |  | Drop the first object in the inventory at the target position. |\n| Drop | Target object | Target position |  |  | Collect the target object and drop it at the target position. |\n| Energy | Target object |  |  |  | Supply the target object with energy from the closest supplier. |\n| Energy | Target object | 0,0 | Supplier |  | Supply the target object with energy from this supplier. |\n| Enter | Target object |  |  |  | Enter the target object. |\n| Exit |  |  |  |  | Exit the current container. |\n| Follow | Target object |  |  |  | Follow the target object (permanently). |\n| Get | Target object |  |  |  | Collect the target object, dig it out if necessary. |\n| Get | Null | Number,0 | Target object | Object type (id) | Get the specified number of objects from the target object. From 4.9.8.3. |\n| Grab | Target object | Offset |  |  | Grab the target object at the specified offset to the object center. |\n| Home |  |  |  |  | Return to the closest friendly home base. |\n| Jump |  |  |  |  | Jump into the current direction. |\n| Jump | Null | Target position |  |  | Jump into the direction of the target position. |\n| MoveTo | Target object | 0,0 | Null | No automatic adjustment? (bool) | Move to the position of the target object. Set iData to true to avoid automatic adjustment of the target coordinates to landscape surface. |\n| MoveTo | Null | Target position | Null | No automatic adjustment? (bool) | Move to the target position. Set iData to true to avoid automatic adjustment of the target coordinates to landscape surface. |\n| None |  |  |  |  | Clear all current commands. |\n| PushTo | Target object | Target position |  |  | Push the target object to the target position. |\n| PushTo | Object | 0,0 | Target object |  | Push the target object into the secondary target object. |\n| Put | Target object |  |  |  | Put the first inventory object into the target object. |\n| Put | Target object | Number,0 |  |  | Put the specified number of inventory objects into the target object. From 4.9.8.3. |\n| Put | Target object | 0,0 | Object |  | Collect the target object and put it into the secondary target object. |\n| Put | Target object | 0,0 | Null | Object type (id) | Put the inventory object of the specified type into the target object. |\n| Put | Target object | Number,0 | Null | Object type (id) | Put the specified number of inventory objects of the specified type into the target object. From 4.9.8.3. |\n| Sell | Null | 0,0 | Object2 | Object type (id) | Sell an object of the specified type at the closest home base. If Object2 is specified, this one will be sold first. |\n| Sell | Basis | Number,0 | Object2 | Object type (id) | Sell a number of objects of the specified type at the home base. If Object2 is specified, this one will be sold first. |\n| Sell | Basis |  |  |  | Open Sell menu for the specified base object. |\n| Throw |  |  |  |  | Throw the first inventory item immediately. |\n| Throw | Null | Target position |  |  | Throw the first inventory item towards the target position. |\n| Throw | Target object | Target position |  |  | Collect the target object and throw it towards the target position. |\n| UnGrab |  |  |  |  | Let go of the object currently grabbed. |\n| Wait | Null | 0,0 | Null | Frames | Wait specified number of frames/ticks. |\n\nTo open the get menu of an object, the data parameter must be true. Example: `func ControlLeft(object byObj) { SetCommand(byObj, \"Get\", , 0, 0, 0, true); }`",
 "rtype": "bool",
 "version": "4.6.5.0 CP"
 },
@@ -9754,7 +9754,7 @@
 "type": "int"
 }
 ],
-"remark": "Die acht Gammarampen haben folgende, für eigene Szenarien selbstverständlich nicht bindende Funktionen:\n\n  iRampIndexFunktion 0Szenarienglobaler Wert 1Klima/Jahreszeiten (Engineintern benutzt, wenn im Szenario aktiviert!) 2frei 3Tag/Nacht 4frei 5Blitze 6Zaubereffekte 7frei \n Allgemein stehen niedrigere Rampenindizes für längerfristige Farbveränderungen; höhere für kürzere Effekte.",
+"remark": "The eight gamma ramps have the following effects:\n\n| iRampIndex | Function |\n|---|---|\n| 0 | Scenario global value |\n| 1 | Climate/Seasons (will be used internally if activated in the scenario) |\n| 2 | free |\n| 3 | Day/Night |\n| 4 | free |\n| 5 | Lightning |\n| 6 | Magic Effects |\n| 7 | free |\n\nGenerally, lower ramp indices mean longer color changes; higher indices mean shorter effects.",
 "rtype": "void",
 "version": "4.9.1.0 GWE"
 },
@@ -9802,7 +9802,7 @@
 "type": "int"
 },
 {
-"desc": "Only in conjunction with iOverlay parameter: specifies how the overlay is to be drawn. The following constants are allowed: \n                KonstanteWertEffekt\n                GFXOV_MODE_None0Ungültig: Nicht benutzen\n                GFXOV_MODE_Base1Die Basisgrafik der angegebenen Definition, das heißt das Zielrechteck (0,0,Width,Height,OffsetX,OffsetY), wird an der Objektposition über die Grafik gelegt.\n                GFXOV_MODE_Action2Die Aktivität der angegebenen Objektdefinition. Ab CR.\n                GFXOV_MODE_Picture3Hat nur Auswirkung, wenn das Objekt im Inventar eines Clonks oder in einem Menü (z.B. Aktivieren in Gebäuden) auftaucht: Das Picture-Rechteck der angegebenen Definition wird über das Repräsentativbild des Objekts gezeichnet. Hiermit können zum Beispiel Zauberer auf Steine oder Zaubersymbole auf Schriftrollen gedruckt werden.\n                GFXOV_MODE_IngamePicture4Legt die Picture-Grafik der Quelldefinition über das Shape des Zielobjektes. Ab CR.\n                GFXOV_MODE_Object5Legt die aktuelle Objektgrafik inklusive aller Overlays von pOverlayObject über das Objekt. Achtung: Ein Objekt darf sich nicht rekursiv über sich selbst als Overlay legen. Ab CR.\n                GFXOV_MODE_ExtraGraphics6Benutzt die angegebene Grafik als Quellgrafik, um das Objekt erneut zu zeichnen. Die Quellkoordinaten sind die gleichen wie die, die auch beim Zeichnen von pObj verwendet wurden. Ab CR.",
+"desc": "Only in conjunction with iOverlay parameter: specifies how the overlay is to be drawn. The following constants are allowed:\n| Constant | Value | Effect |\n|---|---|---|\n| GFXOV_MODE_None | 0 | Invalid: do not use |\n| GFXOV_MODE_Base | 1 | The base graphics of the specified definition, meaning the target rectangle (0,0,Width,Height,OffsetX,OffsetY), will be superimposed at the object position. |\n| GFXOV_MODE_Action | 2 | The actiity of the specified object definition. From CR. |\n| GFXOV_MODE_Picture | 3 | Only affects display of the object in inventory or menus (e.g. when activating in a building). The picture rectangle of the specified definition will be superimposed over the representative picture of the object. In this way you can superimpose a clonk image on a rock or a magic spell picture on a scroll. |\n| GFXOV_MODE_IngamePicture | 4 | Overlays the picture graphics of the source definition over the shape of the target object. From CR. |\n| GFXOV_MODE_Object | 5 | Superimposes the current object graphics including all overlays of pOverlayObject onto the object. Warning: never superimpose an object recursively onto itself! From CR. |\n| GFXOV_MODE_ExtraGraphics | 6 | Draws the target object a second time, using the supplied graphics. The source coordinates are the same as in the original object drawing. Since CR. |",
 "name": "iOverlayMode",
 "type": "int"
 },
@@ -9812,7 +9812,7 @@
 "type": "string"
 },
 {
-"desc": "Blit mode of the overlayed graphics (e.g. additive). Siehe `SetObjectBlitMode`",
+"desc": "Blit mode of the overlayed graphics (e.g. additive). See `SetObjectBlitMode`.",
 "name": "dwBlitMode",
 "type": "int"
 },
@@ -10388,7 +10388,7 @@
 "type": "bool"
 }
 ],
-"remark": "Es sollten nur Objekte gleicher Kategorie voreinander angeordnet werden, da sonst die interne Objektsortierung durcheinandergerät.\nDie eigentliche Umsortierung findet erst später, aber mit Sicherheit noch im selben Frame wie der Scriptaufruf statt.",
+"remark": "You should only resort objects of the same category, otherwise the internal handling mights get confused.\nThe actual resorting is done later but within the same frame as the script call.",
 "rtype": "bool",
 "version": "4.9.1.0 GWE"
 },
@@ -10398,7 +10398,7 @@
 "documented": true,
 "params": [
 {
-"desc": "Neuer Status des Objektes. Folgende Werte sind möglich:\n  NameWertBeschreibung C4OS_DELETED0Objekt ist gelöscht. Kann nicht über SetObjectStatus gesetzt werden. C4OS_NORMAL1Objekt ist aktiviert. C4OS_INACTIVE2Objekt ist deaktiviert",
+"desc": "New object status. The following values are possible:\n| Name | Value | Description |\n|---|---|---|\n| C4OS_DELETED | 0 | The object has been deleted. Can't be set via SetObjectStatus. |\n| C4OS_NORMAL | 1 | Object is activated. |\n| C4OS_INACTIVE | 2 | Object is deactivated. |",
 "name": "iNewStatus",
 "type": "int"
 },
@@ -10473,7 +10473,7 @@
 "type": "int"
 },
 {
-"desc": "Änderungsmodus (symbolische Konstanten ab CR):\n KonstanteWertBedeutung PHYS_Current0Die Eigenschaften werden im gerade aktiven Modus (temporär oder permanent) des Objektes geändert. PHYS_Permanent1Die Eigenschaften werden permanent geändert. Das heißt, dass auch die Infosektion des Objektes modifiziert wird, und die Änderungen somit auch in die Spielerdatei geschrieben werden. Nur Spielercrewobjekte besitzen eine Infosektion. PHYS_Temporary2Für das Objekt wird eine temporäre Infosektion erzeugt, sofern noch nicht vorhanden, und temporären Modus gesetzt. Änderungen im temporären Modus landen nicht in der Spielerdatei. Um temporäre Physicals wieder zu den Originalen zurückzusetzen, sollte `ResetPhysical` verwendet werden. PHYS_StackTemporary3Wie PHYS_Temporary, jedoch wird zusätzlich der vorherige Physical-Wert gesichert und kann einzeln mit einem `ResetPhysical`-Aufruf wiederhergestellt werden. Ab CR.",
+"desc": "Physical attribute change mode (symbolical constants since CR):\n| Constant | Value | Meaning |\n|---|---|---|\n| PHYS_Current | 0 | The physical attributes are changed in the current mode (temporary or permanent) of the object. |\n| PHYS_Permanent | 1 | The physical attributes are changed in permanent mode. This modifies the info section of the associated crew object, which means that the changes will be written to the player file as well. Only player crew objects have  a permanent info section. |\n| PHYS_Temporary | 2 | The object will be set to temporary physical mode, and a temporary info section will be created if none exists already. Use `ResetPhysical` to reset temporary physicals to permanent mode. |\n| PHYS_StackTemporary | 3 | Like PHYS_Temporary, but the previous physical-value will be backed up and can be restored by calling `ResetPhysical`. Since CR. |",
 "name": "iMode",
 "type": "int"
 },
@@ -10643,7 +10643,7 @@
 },
 "SetPlrShowCommand": {
 "arity_known": true,
-"desc": "Markiert für einen Spieler ein bestimmtes Kommando. Ist die Darstellung deaktiviert, so wird sie aktiviert. Das markierte Kommando wird dann (so verfügbar) blinkend dargestellt.\n\n Spielerkommandonummern:  NummerBedeutung 1Links 2Rechts 3Springen 4Stopp 5Werfen 6Graben 7Special 8Special 2  Für Doppelkommandos (z.B. Doppel-Graben) muss jeweils 128 auf den Kommandowert aufaddiert werden.",
+"desc": "Marks the specified control command in the lower right corner of a player's viewport. Command display will be activated if necessary. The marked command will be displayed flashing.\n\nPlayer command numbers:\n| Number | Meaning |\n|---|---|\n| 1 | Left |\n| 2 | Right |\n| 3 | Jump |\n| 4 | Stop |\n| 5 | Throw |\n| 6 | Dig |\n| 7 | Special |\n| 8 | Special 2 |\n For double click commands (e.g. double dig) add 128 to each command number.",
 "documented": true,
 "params": [
 {
@@ -10663,7 +10663,7 @@
 },
 "SetPlrShowControl": {
 "arity_known": true,
-"desc": "Steuert die grafische Darstellung der Clonk-Steuerungstasten eines Spielers in seinem Sichtfenster.\n\n Es können die folgenden Tasten angezeigt werden:  NummerBedeutung 0Cursor Rechts 1Cursor Umschalt 2Cursor Links 3Werfen 4Springen 5Graben 6Links 7Stopp 8Rechts 9Optionen  Für jede Taste kann einzeln angegeben werden, ob und wie sie angezeigt werden soll. Dabei gibt es für jede Taste drei Optionen, die angegeben werden können:  Ob sie angezeigt werden soll Ob die Taste beschriftet sein soll Ob die Beschriftung blinken soll  Entsprechend gibt es 3 Blocks von Optionen. Jeder dieser Blocks besteht dabei aus 10 Buchstaben, wobei \"_\" und \" \" für \"Nein\" und jeder andere Buchstabe für \"Ja\" steht (siehe Beispiel).",
+"desc": "Controls the visual display of the keyboard control block of a given player.\n\nThe following keys can be displayed:\n| Number | Meaning |\n|---|---|\n| 0 | Cursor Right |\n| 1 | Cursor Toggle |\n| 2 | Cursor Left |\n| 3 | Throw |\n| 4 | Jump |\n| 5 | Dig |\n| 6 | Left |\n| 7 | Stop |\n| 8 | Right |\n| 9 | Options |\n\nFor each key you can specify whether and how it is displayed. There are three options per key:\n- whether it is shown at all\n- whether the key is labeled\n- whether the label blinks\n\nAccordingly, the string consists of three option blocks of 10 characters each, where \"_\" and \" \" mean \"no\" and any other character means \"yes\" (see example).",
 "documented": true,
 "params": [
 {
@@ -10683,7 +10683,7 @@
 },
 "SetPlrShowControlPos": {
 "arity_known": true,
-"desc": "Enables the visual display of the keyboard control block for a player (siehe `SetPlrShowControl`).",
+"desc": "Enables the visual display of the keyboard control block for a player (see `SetPlrShowControl`).",
 "documented": true,
 "params": [
 {
@@ -10752,7 +10752,7 @@
 "documented": true,
 "params": [
 {
-"desc": "Name of the portrait to be set. This will load the image file \"PortraitX.png\" (X being replaced with the specified name). This parameter can handle the following special values: \n              WertBedeutung\n              \"none\"Portrait wird entfernt.\n              \"random\"Aus den vorhandenen Portraits wird eines zufällig ausgewählt.\n              \"custom\"Das Portrait wird auf das individuelle Portrait des Objekts, sofern vorhanden, geändert.",
+"desc": "Name of the portrait to be set. This will load the image file \"PortraitX.png\" (X being replaced with the specified name). This parameter can handle the following special values:\n| Value | Meaning |\n|---|---|\n| \"none\" | Portrait will be removed. |\n| \"random\" | A random portrait will be selected from all available portraits. |\n| \"custom\" | The portrait will be set to the object's individually stored portrait, if available. |",
 "name": "szPortrait",
 "type": "string"
 },
@@ -10876,11 +10876,11 @@
 },
 "SetRestoreInfos": {
 "arity_known": true,
-"desc": "Stellt bei Rundenneustart über den Neustart-Knopf Einstellungen in der Lobby wieder her.\n Es gelten die Werte, die zu Spielstart in der Lobby eingestellt waren.\n Im Spiel nachträglich gemachte Änderungen werden nicht beachtet.",
+"desc": "Restores some things in the lobby on restart via the restart button.\nThe values set in the lobby are restored.\nLater ingame changes are not considered.",
 "documented": true,
 "params": [
 {
-"desc": "Bit mask of the things to be restored: \n\t\t\t\t\t\t\tNameBeschreibung\n\t\t\t\t\t\t\tRESTORE_NoneNichts. Standardeinstellung.\n\t\t\t\t\t\t\tRESTORE_ScriptPlayersIn der Lobby eingestellte Scriptspieler, inkl. Name, Team und Farbe.\n\t\t\t\t\t\t\tRESTORE_PlayerTeamsIn der Lobby zugewiesene Spielerteams anhand der Spielernamen.",
+"desc": "Bit mask of the things to be restored:\n| Name | Description |\n|---|---|\n| RESTORE_None | Nothing. Default. |\n| RESTORE_ScriptPlayers | Script players as setup in the lobby, incl. name, team and color. |\n| RESTORE_PlayerTeams | Player teams set in the lobby according to player names. |",
 "name": "what",
 "type": "int"
 }
@@ -10891,7 +10891,7 @@
 },
 "SetScoreboardData": {
 "arity_known": true,
-"desc": "Setzt Daten im Scoreboard. Das Scoreboard ist eine globale Tabelle, die Szenarien nutzen können um zum Beispiel den aktuellen Punktestand aller Spieler oder sonstige Rundendaten darzustellen. Es wird vom Spieler standardgemäß mit der Taste Tab aufgerufen, kann aber auch per Script mit `DoScoreboardShow` forciert gezeigt oder verborgen werden.\n Das Scoreboard wird automatisch erstellt, sobald Daten darin gesetzt werden. Es wird automatisch gelöscht, wenn es außer Überschriften keine Daten mehr enthält.\n Daten werden über einen Zeilen- und Spaltenindex adressiert. Werte mit gleichem Zeilenindex landen in der gleichen Zeile; Werte mit gleichem Spaltenindex in der gleichen Spalte. Existieren noch keine Daten für einen Zeilen- bzw. Spaltenindex, so wird die Zeile bzw. Spalte neu angelegt und unten bzw. rechts angehängt. Es ist also nicht entscheidend, welche Indizes verwendet werden, solange sie eindeutig sind. Es können z.B. Spielernummern, Spieler-IDs (siehe `GetPlayerID`) oder Team-IDs (siehe `GetPlayerTeam`) angegeben werden. Damit mehrere Objektdefinitionen wie zum Beispiel ein Todeszähler nicht dieselben IDs für Spalten verwenden, gibt es die Funktion `ScoreboardCol`, die aus einer ID einen eindeutige Spaltenindex generiert. Dabei ist natürlich trotzdem darauf zu achten, dass mehrere solcher Objekte die gleichen Zeilenadressierungen verwenden. Indizes müssen nicht fortlaufend sein; Zeilen und Spalten werden nach Reihenfolge des Hinzufügens und nicht nach Indizes sortiert. Für benutzerdefinierte Sortierungen (zum Beispiel absteigend nach Punkten für eine Bestenliste) dient die Funktion `SortScoreboard`.",
+"desc": "Sets data in the scoreboard. The scoreboard is a global data table which can be used by scenarios to keep track of each player's score or other data. By default, the scoreboard can be displayed with the Tab key but display can also be controlled using `DoScoreboardShow`.\nThe scoreboard is automatically created when data is set and automatically removed when all data is cleared.\nData is set using a row and column index. If the row or column of a specified index does not yet exist, it is created as soon as data in this row or column is set. It does not matter which numeric indices you use as long as they are unique. So you could also use player numbers, player IDs (see `GetPlayerID`), or team IDs (see `GetPlayerTeam`) as row or column index. In order to prevent different object scripts from accidentally using the same row or column index you can use the `ScoreboardCol` function which will create a unique column index from a given value. In this case you should still take care that all object scripts accessing the scoreboard are using matching row indices. Rows and columnd are not sorted by row or column index. You can use the `SortScoreboard` function for user defined sorting.",
 "documented": true,
 "params": [
 {
@@ -10905,7 +10905,7 @@
 "type": "int"
 },
 {
-"desc": "Zu setzender Zellentext. Wenn 0 oder nicht angegeben, wird die Zelle ausgeleert. Sind in einer Zeile alle Zellen bis auf die Überschrift (Index SBRD_Caption) leer, wird diese Zeile komplett entfernt. Selbiges gilt für Spalten. Die Überprüfung auf leere Zeilen und Spalten wird immer nur dann durchgeführt, wenn eine Zelle ausgeleert wird.\nUm Text in anderen Farben darzustellen oder Symbole im Scoreboard einzufügen, sollte entsprechendes Markup verwendet werden.",
+"desc": "Text data to be set. If unspecified or 0, the cell is cleared. If a row is completely empty except for the header (SBRD_Caption), the row is removed. The same applies to columns. Row or column removal is only performed after clearing of a cell.\nTo display symbols or text in different colors you can use markup.",
 "name": "sText",
 "type": "string"
 },
@@ -11315,7 +11315,7 @@
 "documented": true,
 "params": [
 {
-"desc": "Bitmaske, die die neue Sichtbarkeit angibt.\n Entweder `VIS_All`, `VIS_OverlayOnly` oder `VIS_None`, oder eine Bitmaske aus `VIS_Owner`, `VIS_Allies`, `VIS_Enemies`, `VIS_God` und `VIS_Local`.",
+"desc": "Bit mask defining the new visibility.\nEither `VIS_All`, `VIS_OverlayOnly` or `VIS_None`, or a bit mask of `VIS_Owner`, `VIS_Allies`, `VIS_Enemies`, `VIS_God` and `VIS_Local`.",
 "name": "dwVisibility",
 "type": "int"
 },
@@ -11511,7 +11511,7 @@
 },
 "SimFlight": {
 "arity_known": true,
-"desc": "Simuliert die Bewegung eines freien Falles mit Anfangsgeschwindigkeit in die angegebene Richtung. Wenn die simulierte Bewegung ein Material mit der gewünschten Dichte durchläuft, gibt diese Funktion true zurück, ansonsten false.\n Bei true wird die X- und Y-Position des Aufpralls in den angegebenen Variablen für iX und iY gespeichert, die Aufprallgeschwindigkeit in den angegebenen Variablen fü iXDir und iYDir. Siehe dazu Referenzen.",
+"desc": "Simulates the motion of a falling object with a given starting position and initial speed. If the projected trajectory encounters a material of the specified density, the simulation will stop and the function will return 'true'. Otherwise the function will return 'false'.\nIf the return value is 'true', the x and y coordinates of the point of interception will be stored in the specified variables for iX and iY, the horizontal and vertical speed at the time of interception in iXDir and iYDir respectively. See references for details.",
 "documented": true,
 "params": [
 {
@@ -11889,7 +11889,7 @@
 "type": "int"
 },
 {
-"desc": "Wert, der durch das Training nie überschritten wird. Es wird allerdings in keinem Fall die Physical reduziert, auch wenn der Zielwert unter dem hier angegebenen Wert läge.",
+"desc": "Maximum training value. In no case, the physical property of the clonk will be modified, even if its value is lower than the value specified here.",
 "name": "iMaxTrain",
 "type": "int"
 },
@@ -12008,7 +12008,7 @@
 "type": "int"
 }
 ],
-"remark": "In älteren Versionen implizierte goto() ein `return`(). Dieses Verhalten wird bei Nicht-Angabe von #strict emuliert.",
+"remark": "In older script versions goto() would also cause an immediate `return`(). This behaviour has changed with the #strict standard. Now you have to write your `return`() separately.",
 "rtype": "bool",
 "version": "4.6.5.0 CP"
 },

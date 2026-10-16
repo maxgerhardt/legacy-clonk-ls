@@ -33,6 +33,8 @@ struct Backend {
     workspace: RwLock<Workspace>,
     /// C4Script index of all scripts below the workspace roots
     index: RwLock<Index>,
+    /// game folder (initializationOptions.gameDir / env C4LS_GAME_DIR) and whether to index all its packs
+    game: RwLock<Option<(std::path::PathBuf, bool)>>,
 }
 
 impl Backend {
@@ -307,6 +309,17 @@ impl LanguageServer for Backend {
                 roots.extend(r.as_str().map(std::path::PathBuf::from));
             }
         }
+        let mut game_dir = std::env::var_os("C4LS_GAME_DIR").filter(|v| !v.is_empty()).map(std::path::PathBuf::from);
+        let mut all_packs = false;
+        if let Some(opts) = &params.initialization_options {
+            if let Some(g) = opts.get("gameDir").and_then(|v| v.as_str()) {
+                game_dir = Some(std::path::PathBuf::from(g));
+            }
+            all_packs = opts.get("allPacks").and_then(|v| v.as_bool()).unwrap_or(false);
+        }
+        if let Ok(mut g) = self.game.write() {
+            *g = game_dir.map(|d| (d, all_packs));
+        }
         if let Ok(extra) = std::env::var("C4LS_EXTRA_ROOTS") {
             roots.extend(extra.split(';').filter(|s| !s.is_empty()).map(std::path::PathBuf::from));
         }
@@ -429,6 +442,31 @@ impl LanguageServer for Backend {
         self.client
             .log_message(MessageType::INFO, "server initialized")
             .await;
+        // Index the game's packs (Objects.c4d + packs named in scenarios' [Definitions]); unpacking with
+        // c4group can take a few seconds, so it runs on a blocking thread and open scripts are re-checked after.
+        let game = self.game.read().ok().and_then(|g| g.clone());
+        if let Some((game_dir, all)) = game {
+            let packs = match self.index.read() {
+                Ok(i) => legacy_clonk_ls::analysis::index::game_packs_to_index(&i, &game_dir, all),
+                Err(_) => vec![],
+            };
+            let result = tokio::task::spawn_blocking(move || {
+                legacy_clonk_ls::analysis::index::index_game_packs(&game_dir, &packs)
+            })
+            .await;
+            if let Ok((packs_index, log)) = result {
+                for l in log {
+                    self.client.log_message(MessageType::INFO, l).await;
+                }
+                if let Ok(mut i) = self.index.write() {
+                    i.merge(packs_index);
+                }
+                let open: Vec<Url> = self.documents.iter().map(|d| d.key().clone()).collect();
+                for uri in open {
+                    self.refresh(uri).await;
+                }
+            }
+        }
     }
 
     async fn shutdown(&self) -> Result<()> {
@@ -504,6 +542,7 @@ async fn start_language_server() {
         documents: DashMap::new(),
         workspace: RwLock::new(Workspace::new()),
         index: RwLock::new(Index::default()),
+        game: RwLock::new(None),
     })
     .custom_method("x-legacy-clonk/getAllIds", Backend::request_ids)
     .finish();

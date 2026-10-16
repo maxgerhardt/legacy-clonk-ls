@@ -1,5 +1,6 @@
+import * as fs from 'fs';
 import * as path from 'path';
-import { commands, ExtensionContext, extensions, OutputChannel, QuickPickItem, window } from 'vscode';
+import { commands, ExtensionContext, extensions, OutputChannel, QuickPickItem, window, workspace } from 'vscode';
 
 import {
 	LanguageClient,
@@ -32,6 +33,19 @@ function configureAndStartLanguageServer(context: ExtensionContext) {
 		path.join('..', 'server', 'target', 'debug', executableName)
 	);
 
+	// The executable bit can get lost when the server binary is packaged into the .vsix
+	if (process.platform !== 'win32') {
+		try {
+			fs.chmodSync(pathToBin, 0o755);
+		} catch (e) {
+			// not fatal: the server start below reports the actual problem
+		}
+	}
+
+	// The game folder lets the server index the packs scenarios load (Objects.c4d, Knights.c4d, ...)
+	const gameExecutable = workspace.getConfiguration(CONFIG_NAME).get<string>('pathToGameExecutable');
+	const initializationOptions = gameExecutable ? { gameDir: path.dirname(gameExecutable) } : {};
+
 	const serverOptions: ServerOptions = {
 		run: {
 			command: pathToBin,
@@ -53,6 +67,7 @@ function configureAndStartLanguageServer(context: ExtensionContext) {
 			scheme: 'file',
 			language: 'c4ini',
 		}],
+		initializationOptions,
 	};
 
 	client = new LanguageClient(

@@ -87,6 +87,8 @@ pub struct Index {
     pub roots: Vec<PathBuf>,
     pub files: HashMap<String, FileInfo>,
     pub ids: HashMap<String, IdInfo>,
+    /// Packs named in `DefinitionN=` lines of the Scenario.txt files found while scanning (e.g. "Knights.c4d")
+    pub referenced_packs: HashSet<String>,
 }
 
 pub fn path_key(p: &Path) -> String {
@@ -313,6 +315,8 @@ impl Index {
                 self.scan_dir(&p, parser, seen);
             } else if name.eq_ignore_ascii_case("DefCore.txt") {
                 self.index_defcore(&p);
+            } else if name.eq_ignore_ascii_case("Scenario.txt") {
+                self.collect_definitions(&p);
             } else if is_clonk_script(&p) {
                 if let Ok(bytes) = std::fs::read(&p) {
                     let src = decode_bytes(&bytes);
@@ -322,6 +326,42 @@ impl Index {
                 }
             }
         }
+    }
+
+    /// Remember the packs a scenario loads: [Definitions] Definition1=Objects.c4d, ...
+    fn collect_definitions(&mut self, p: &Path) {
+        let text = match std::fs::read(p) {
+            Ok(b) => decode_bytes(&b),
+            Err(_) => return,
+        };
+        for line in text.lines() {
+            let line = line.trim();
+            if let Some((key, value)) = line.split_once('=') {
+                let key = key.trim();
+                if key.len() > 10 && key[..10].eq_ignore_ascii_case("Definition") && key[10..].chars().all(|c| c.is_ascii_digit()) {
+                    let v = value.trim().replace('\\', "/");
+                    if !v.is_empty() {
+                        self.referenced_packs.insert(v);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Merge another index (e.g. of game packs); existing entries win.
+    pub fn merge(&mut self, other: Index) {
+        for (k, f) in other.files {
+            self.files.entry(k).or_insert(f);
+        }
+        for (k, i) in other.ids {
+            self.ids.entry(k).or_insert(i);
+        }
+    }
+
+    /// Is a pack with this file name (e.g. "Objects.c4d") already indexed as a folder somewhere?
+    pub fn has_pack_folder(&self, pack: &str) -> bool {
+        let needle = format!("/{}/", pack.to_lowercase());
+        self.files.keys().any(|k| k.contains(&needle))
     }
 
     fn index_defcore(&mut self, p: &Path) {
@@ -448,4 +488,104 @@ impl Index {
         }
         out
     }
+}
+
+/// Packs of the game folder to index for a workspace: Objects.c4d (loaded by default) plus every pack a
+/// scenario names in its [Definitions] section, or all *.c4d/*.c4f with `all`. Packs already present as
+/// folders in the workspace (e.g. reference/Objects.c4d) are skipped.
+pub fn game_packs_to_index(index: &Index, game_dir: &Path, all: bool) -> Vec<String> {
+    let mut packs: Vec<String> = vec!["Objects.c4d".to_string()];
+    if all {
+        if let Ok(entries) = std::fs::read_dir(game_dir) {
+            for e in entries.flatten() {
+                let n = e.file_name().to_string_lossy().to_string();
+                let l = n.to_lowercase();
+                if l.ends_with(".c4d") || l.ends_with(".c4f") {
+                    packs.push(n);
+                }
+            }
+        }
+    } else {
+        packs.extend(index.referenced_packs.iter().cloned());
+    }
+    packs.sort_by_key(|p| p.to_lowercase());
+    packs.dedup_by_key(|p| p.to_lowercase());
+    packs
+        .into_iter()
+        .filter(|p| {
+            let name = Path::new(p).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            !index.has_pack_folder(&name)
+        })
+        .collect()
+}
+
+/// Index the given packs of the game folder. Packed groups are unpacked once with the game's c4group into a
+/// cache folder (keyed by size and modification time, so an updated pack is unpacked again); the originals
+/// are never modified. Returns the new index and log lines.
+pub fn index_game_packs(game_dir: &Path, packs: &[String]) -> (Index, Vec<String>) {
+    let mut index = Index::default();
+    let mut log = vec![];
+    let mut parser = new_parser();
+    let mut seen = HashSet::new();
+    for pack in packs {
+        let path = game_dir.join(pack);
+        if !path.exists() {
+            log.push(format!("pack not found in game folder: {}", path.display()));
+            continue;
+        }
+        let dir = if path.is_dir() {
+            Some(path.clone())
+        } else {
+            match unpack_cached(game_dir, &path) {
+                Ok(d) => Some(d),
+                Err(e) => {
+                    log.push(format!("could not unpack {}: {}", path.display(), e));
+                    None
+                }
+            }
+        };
+        if let Some(dir) = dir {
+            let before = index.files.len();
+            index.scan_dir(&dir, &mut parser, &mut seen);
+            log.push(format!("indexed pack {} ({} scripts) from {}", pack, index.files.len() - before, dir.display()));
+        }
+    }
+    (index, log)
+}
+
+pub fn pack_cache_root() -> PathBuf {
+    let base = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    base.join("legacy-clonk-ls").join("packs")
+}
+
+fn unpack_cached(game_dir: &Path, pack: &Path) -> Result<PathBuf, String> {
+    let meta = std::fs::metadata(pack).map_err(|e| e.to_string())?;
+    let mtime = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let name = pack.file_name().ok_or("no file name")?.to_string_lossy().to_string();
+    let slot = pack_cache_root().join(format!("{}-{}-{}", name, meta.len(), mtime));
+    let target = slot.join(&name);
+    if target.is_dir() {
+        return Ok(target);
+    }
+    let c4group = ["c4group.exe", "c4group"].iter().map(|n| game_dir.join(n)).find(|p| p.exists()).ok_or("c4group not found in game folder")?;
+    std::fs::create_dir_all(&slot).map_err(|e| e.to_string())?;
+    std::fs::copy(pack, &target).map_err(|e| e.to_string())?;
+    // explode the copy in place (recursively unpacks nested groups)
+    let status = std::process::Command::new(&c4group)
+        .arg(&target)
+        .arg("-x")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map_err(|e| e.to_string())?;
+    if !status.success() || !target.is_dir() {
+        let _ = std::fs::remove_dir_all(&slot);
+        return Err(format!("c4group failed ({})", status));
+    }
+    Ok(target)
 }

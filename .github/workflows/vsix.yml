@@ -1,0 +1,82 @@
+name: Build VS Code extension (.vsix)
+
+# Builds the language server for Windows and Linux, bundles the VS Code client and packages both into
+# one installable .vsix (Actions run > Artifacts). Pushing a tag v* also attaches it to a GitHub release.
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  server:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            exe: lsp.exe
+            check: c4check.exe
+          - os: ubuntu-latest
+            exe: lsp
+            check: c4check
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      - name: Build language server and c4check
+        working-directory: server
+        run: cargo build --release --bin lsp --bin c4check
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-${{ matrix.os }}
+          path: |
+            server/target/release/${{ matrix.exe }}
+            server/target/release/${{ matrix.check }}
+          if-no-files-found: error
+
+  package:
+    needs: server
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: server-*
+          path: artifacts
+      - name: Put server binaries where the extension looks for them (client/out)
+        run: |
+          mkdir -p client/client/out
+          cp artifacts/server-windows-latest/lsp.exe client/client/out/
+          cp artifacts/server-ubuntu-latest/lsp client/client/out/
+          chmod +x client/client/out/lsp
+      - name: Bundle extension
+        working-directory: client
+        run: |
+          npm ci --no-audit --no-fund
+          (cd client && npm ci --no-audit --no-fund)
+          npm run compile
+      - name: Package .vsix
+        working-directory: client
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          npx --yes @vscode/vsce package --skip-license -o "../legacy-clonk-ext-${VERSION}.vsix"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: legacy-clonk-ext-vsix
+          path: legacy-clonk-ext-*.vsix
+          if-no-files-found: error
+      - name: Attach to release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: legacy-clonk-ext-*.vsix

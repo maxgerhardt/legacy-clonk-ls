@@ -1,0 +1,25 @@
+{
+  "_comment": "English texts for lcdocs entries without a usable translation in lcdocs/en.po: the German source changed after it was translated (no matching msgid), or the en.po text has German leftovers. Applied by gen_engine_api.py after en.po. Markdown, function names in backticks.",
+  "GetPlrViewMode": {
+    "desc": "Determines the current view mode of a player. The function returns one of the following values:\n- 0: Cursor - the player's view follows the currently selected clonk (see `GetCursor`)\n- 1: Target - the view follows another object that was set by `SetPlrView` in a script. See also `GetPlrView`.\n- 2: Scroll - the player moves the view independently of any object's position. This happens when the player moves the mouse to the edge of the viewport."
+  },
+  "SetPlrShowControl": {
+    "desc": "Controls the visual display of the keyboard control block of a given player.\n\nThe following keys can be displayed:\n| Number | Meaning |\n|---|---|\n| 0 | Cursor Right |\n| 1 | Cursor Toggle |\n| 2 | Cursor Left |\n| 3 | Throw |\n| 4 | Jump |\n| 5 | Dig |\n| 6 | Left |\n| 7 | Stop |\n| 8 | Right |\n| 9 | Options |\n\nFor each key you can specify whether and how it is displayed. There are three options per key:\n- whether it is shown at all\n- whether the key is labeled\n- whether the label blinks\n\nAccordingly, the string consists of three option blocks of 10 characters each, where \"_\" and \" \" mean \"no\" and any other character means \"yes\" (see example)."
+  },
+  "SetVisibility": {
+    "params": {
+      "dwVisibility": "Bit mask defining the new visibility.\nEither `VIS_All`, `VIS_OverlayOnly` or `VIS_None`, or a bit mask of `VIS_Owner`, `VIS_Allies`, `VIS_Enemies`, `VIS_God` and `VIS_Local`."
+    }
+  },
+  "GetKiller": {
+    "remark": "Because of the complexity of the Clonk game world it is not always possible to find the actual cause of damage in chain reactions. To track damage, every object stores a controlling player: the number of the player who last controlled, threw, pushed, shot, etc. the object (for details see `GetController`). This field is used to determine the player causing damage:\n- Object hits: the controlling player of the thrown object. For items this is set automatically when they are collected. In clonk-to-clonk fights the controlling player of the opponent counts directly as the cause, which is normally the owner.\n- Fire: the controller of whoever originally caused the fire, i.e. the calling object of `Incinerate` calls. The cause is passed on through chains of ignition, regardless of owners or controlling players of the burning objects. If, for example, player A sets fire to a clonk of player B, which then ignites a clonk of player C, both fires count as caused by player A.\n\nThe damage cause of a clonk is automatically reset to NO_OWNER (no player) when the clonk performs an activity that doesn't have ObjectDisabled=1 set (for example \"Walk\").\nSelf-inflicted damage only sets the field to the clonk's own player if it was NO_OWNER before. This prevents a player from taking points away from other players by quickly committing suicide. If a clonk falls out at the bottom, the last player who caused damage counts as the killer; if the clonk was knocked down by a thrown rock, the rock thrower counts."
+  },
+  "SetPlrShowControlPos": {
+    "desc": "Enables the visual display of the keyboard control block for a player (see `SetPlrShowControl`)."
+  },
+  "SetGraphics": {
+    "params": {
+      "dwBlitMode": "Blit mode of the overlayed graphics (e.g. additive). See `SetObjectBlitMode`."
+    }
+  }
+}

@@ -1,11 +1,14 @@
 //! Command-line checker: index the roots and print diagnostics for C4Script files.
 //!
-//! Usage: c4check [--root DIR]... [--errors-only] [PATH]...
+//! Usage: c4check [--root DIR]... [--game-dir DIR] [--all-packs] [--errors-only] [PATH]...
 //!   --root DIR     folder to index (repeatable; default: current directory)
+//!   --game-dir DIR game folder (default: env C4LS_GAME_DIR): its Objects.c4d and the packs the scenarios
+//!                  name in [Definitions] are indexed too (packed groups are unpacked once into a cache)
+//!   --all-packs    index every pack of the game folder
 //!   PATH           files or folders to check (default: everything indexed)
 //! Output: <file>:<line>:<col>: <severity> [<code>] <message>; exit code 1 if there are errors.
 
-use legacy_clonk_ls::analysis::{diagnostics::diagnose, index::{path_key, new_parser, extract, Index}, text::decode_bytes};
+use legacy_clonk_ls::analysis::{diagnostics::diagnose, index::{self, path_key, new_parser, extract, Index}, text::decode_bytes};
 use std::path::PathBuf;
 use tower_lsp::lsp_types::DiagnosticSeverity;
 
@@ -13,13 +16,17 @@ fn main() {
     let mut roots = vec![];
     let mut targets = vec![];
     let mut errors_only = false;
+    let mut game_dir = std::env::var_os("C4LS_GAME_DIR").filter(|v| !v.is_empty()).map(PathBuf::from);
+    let mut all_packs = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--root" => roots.push(PathBuf::from(args.next().expect("--root needs a folder"))),
             "--errors-only" => errors_only = true,
+            "--game-dir" => game_dir = Some(PathBuf::from(args.next().expect("--game-dir needs a folder"))),
+            "--all-packs" => all_packs = true,
             "-h" | "--help" => {
-                eprintln!("usage: c4check [--root DIR]... [--errors-only] [PATH]...");
+                eprintln!("usage: c4check [--root DIR]... [--game-dir DIR] [--all-packs] [--errors-only] [PATH]...");
                 return;
             }
             _ => targets.push(PathBuf::from(a)),
@@ -29,7 +36,15 @@ fn main() {
         roots.push(std::env::current_dir().unwrap());
     }
     let roots: Vec<PathBuf> = roots.into_iter().map(|r| r.canonicalize().unwrap_or(r)).collect();
-    let index = Index::build(roots);
+    let mut index = Index::build(roots);
+    if let Some(gd) = &game_dir {
+        let packs = index::game_packs_to_index(&index, gd, all_packs);
+        let (packs_index, log) = index::index_game_packs(gd, &packs);
+        for l in log {
+            eprintln!("{}", l);
+        }
+        index.merge(packs_index);
+    }
     let targets: Vec<String> = targets.iter().map(|t| path_key(&t.canonicalize().unwrap_or(t.clone()))).collect();
     let mut files: Vec<_> = index.files.values().filter(|f| {
         let k = path_key(&f.path);

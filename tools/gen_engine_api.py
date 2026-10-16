@@ -8,6 +8,8 @@ Sources:
 Usage: python tools/gen_engine_api.py <path to LegacyClonk/src> [--lcdocs lcdocs] [--out server/src/core/engine_api.json]
 """
 import argparse
+import copy
+import difflib
 import glob
 import json
 import os
@@ -59,75 +61,149 @@ def parse_engine(src_dir):
 
 
 def parse_po(path):
-    """msgid -> msgstr from a gettext .po file (multi-line strings joined)."""
-    out, cur, key = {}, None, None
-    msgid = msgstr = None
+    """Parse a gettext .po file (UTF-8).
+
+    Returns (msgid -> msgstr, {source file -> [(element tag, msgid, msgstr)]}). The second map comes from the
+    "#: sdk/script/fn/X.xml:16(desc)" reference comments, so entries can be found by where they come from.
+    """
+    out, refs = {}, {}
+    state = {"refs": [], "id": None, "str": None, "cur": None}
 
     def unq(x):
         return json.loads(x) if x.startswith('"') else x
 
+    def flush():
+        if state["id"] and state["str"]:
+            out[state["id"]] = state["str"]
+            for r in state["refs"]:
+                m = re.match(r"(.+?):\d+\((\w+)\)", r)
+                if m:
+                    refs.setdefault(m.group(1), []).append((m.group(2), state["id"], state["str"]))
+        state.update(refs=[], id=None, str=None, cur=None)
+
     for line in open(path, encoding="utf-8"):
         line = line.rstrip("\n")
-        if line.startswith("msgid "):
-            if msgid is not None and msgstr:
-                out[msgid] = msgstr
-            msgid, msgstr, cur = unq(line[6:]), "", "id"
+        if line.startswith("#:"):
+            if state["cur"] == "str":
+                flush()
+            state["refs"].extend(line[2:].split())
+        elif line.startswith("msgid "):
+            if state["cur"] == "str":
+                flush()
+            state.update(id=unq(line[6:]), str="", cur="id")
         elif line.startswith("msgstr "):
-            msgstr, cur = unq(line[7:]), "str"
+            state.update(str=unq(line[7:]), cur="str")
         elif line.startswith('"'):
-            if cur == "id":
-                msgid += unq(line)
-            elif cur == "str":
-                msgstr += unq(line)
-    if msgid is not None and msgstr:
-        out[msgid] = msgstr
-    return out
+            if state["cur"] in ("id", "str"):
+                state[state["cur"]] += unq(line)
+    flush()
+    return out, refs
+
+
+def norm(x):
+    """Whitespace collapsed, self-closing tags written like xml2po does (<br/>, not <br />)."""
+    return re.sub(r"\s*/>", "/>", re.sub(r"\s+", " ", x)).strip()
+
+
+def without_tail(el):
+    """Shallow copy without the text following the element (ET.tostring would include it, XML-escaped)."""
+    c = copy.copy(el)
+    c.tail = None
+    return c
 
 
 def inner_xml(el):
-    """Element content as xml2po sees it: text + child tags, whitespace collapsed."""
-    parts = [el.text or ""]
-    for c in el:
-        parts.append(ET.tostring(c, encoding="unicode"))
-    return re.sub(r"\s+", " ", "".join(parts)).strip()
+    """Element content as xml2po sees it: text (XML-escaped, like &gt;) + child tags."""
+    xml = ET.tostring(without_tail(el), encoding="unicode")
+    if xml.endswith("/>"):
+        return ""
+    xml = xml[xml.index(">") + 1: xml.rindex("</")]
+    return norm(xml)
+
+
+def plain(x):
+    """Text only (no tags/placeholders, entities decoded), for fuzzy matching."""
+    x = re.sub(r"<[^>]+>", " ", x)
+    x = x.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+    return re.sub(r"\s+", " ", x).strip()
 
 
 def to_markdown(x):
     x = re.sub(r"<funclink>(.*?)</funclink>", r"`\1`", x)
     x = re.sub(r"<code>(.*?)</code>", r"`\1`", x)
     x = re.sub(r"<emlink[^>]*>(.*?)</emlink>", r"\1", x)
-    x = re.sub(r"<br\s*/>", "\n", x)
+    x = re.sub(r"<br\s*/>\s*", "\n", x)
     x = re.sub(r"<[^>]+>", "", x)
-    return x.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").strip()
+    x = x.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+    return re.sub(r"[ \t]+\n", "\n", x).strip()
 
 
 def parse_docs(lcdocs):
-    po = parse_po(os.path.join(lcdocs, "en.po"))
+    po, refs = parse_po(os.path.join(lcdocs, "en.po"))
+    stats = {"exact": 0, "fuzzy": 0, "german": 0}
 
-    def tr(el):
+    def table_md(el, relfile):
+        rows = []
+        for r in el:
+            cells = [tr(c, relfile).replace("\n", " ").replace("|", "/") for c in r]
+            rows.append("| " + " | ".join(cells) + " |")
+            if r.tag == "rowh":
+                rows.append("|" + "---|" * len(cells))
+        # escape markdown as text so to_markdown() keeps it (it only strips tags)
+        return "\n" + "\n".join(rows).replace("<", "&lt;").replace(">", "&gt;") + "\n"
+
+    def child_xml(c, relfile):
+        if c.tag == "table":
+            return table_md(c, relfile)
+        return ET.tostring(without_tail(c), encoding="unicode")
+
+    def tr(el, relfile):
         if el is None:
             return ""
         x = inner_xml(el)
+        if not x:
+            return ""
         if x in po:
+            stats["exact"] += 1
             return to_markdown(po[x])
-        # xml2po replaces inline child elements by <placeholder-N/> in the msgid
+        # all child elements as <placeholder-N/> (xml2po does this e.g. for funclink)
         parts = [el.text or ""]
         for i, c in enumerate(el, 1):
             parts.append(f"<placeholder-{i}/>")
             parts.append(c.tail or "")
-        key = re.sub(r"\s+", " ", "".join(parts)).strip()
+        key = norm("".join(parts).replace("&", "&amp;").replace("<placeholder", "\0").replace("<", "&lt;")
+                   .replace(">", "&gt;").replace("\0", "<placeholder").replace("/&gt;", "/>"))
         if key in po:
-            out = po[key]
+            mstr = po[key]
             for i, c in enumerate(el, 1):
-                c_xml = ET.tostring(c, encoding="unicode")
-                if c.tail:
-                    c_xml = c_xml[: len(c_xml) - len(c.tail)]
-                out = out.replace(f"<placeholder-{i}/>", c_xml)
-            return to_markdown(out)
+                mstr = mstr.replace(f"<placeholder-{i}/>", child_xml(c, relfile))
+            stats["exact"] += 1
+            return to_markdown(mstr)
+        # xml2po replaces some child elements (funclink, table, ...) by <placeholder-N/>: take the entry of the
+        # same file and element type whose text is most similar, then put the children back in order
+        # compare without tables: their cells are separate entries and would dominate the similarity
+        skeleton = plain(re.sub(r"<table>.*?</table>", " ", x, flags=re.S))
+        best, best_ratio = None, 0.0
+        for tag, mid, mstr in refs.get(relfile, []):
+            if tag != el.tag:
+                continue
+            ratio = difflib.SequenceMatcher(None, plain(mid), skeleton).ratio()
+            if ratio > best_ratio:
+                best, best_ratio = (mid, mstr), ratio
+        if best and best_ratio >= 0.75:
+            mid, mstr = best
+            inline = set(re.findall(r"<(\w+)", mid))
+            ph_children = [c for c in el if c.tag not in inline]
+            for i, c in enumerate(ph_children, 1):
+                mstr = mstr.replace(f"<placeholder-{i}/>", child_xml(c, relfile))
+            stats["fuzzy"] += 1
+            return to_markdown(mstr)
+        stats["german"] += 1
         return to_markdown(x)
 
     docs = {}
     for f in glob.glob(os.path.join(lcdocs, "sdk", "script", "fn", "*.xml")):
+        # all lcdocs XML files are ISO-8859-1 (declared in their header)
         raw = open(f, "rb").read().decode("latin-1")
         raw = re.sub(r"<!DOCTYPE[^>]*>", "", raw).replace('encoding="ISO-8859-1"', "")
         raw = re.sub(r"&(?!(lt|gt|amp|quot|apos);)\w+;", " ", raw)  # DTD entities like &nbsp;
@@ -136,6 +212,7 @@ def parse_docs(lcdocs):
         except ET.ParseError as e:
             print("skip", f, e)
             continue
+        relfile = os.path.relpath(f, lcdocs).replace("\\", "/")
         for fn in root.iter("func"):
             title = (fn.findtext("title") or "").strip()
             syn = fn.find("syntax")
@@ -144,17 +221,42 @@ def parse_docs(lcdocs):
                 for p in syn.iter("param"):
                     params.append({"name": (p.findtext("name") or "").strip(),
                                    "type": (p.findtext("type") or "any").strip(),
-                                   "desc": tr(p.find("desc")),
+                                   "desc": tr(p.find("desc"), relfile),
                                    "optional": p.find("optional") is not None})
             docs[title] = {
                 "rtype": (syn.findtext("rtype") if syn is not None else None) or "",
                 "params": params,
-                "desc": tr(fn.find("desc")),
-                "remark": tr(fn.find("remark")),
+                "desc": tr(fn.find("desc"), relfile),
+                "remark": tr(fn.find("remark"), relfile),
                 "version": (fn.findtext("version") or "").strip(),
                 "category": (fn.findtext("category") or "").strip(),
             }
+    print(f"translations: {stats['exact']} exact, {stats['fuzzy']} matched by source reference, "
+          f"{stats['german']} without English text")
     return docs
+
+
+GERMAN_HINT = re.compile(r"\b(der|die|das|und|wird|eine?|des|nicht|wenn|oder|siehe|für|für)\b", re.I)
+
+
+def apply_overrides(docs, path):
+    """English texts for entries en.po has no (current) translation for; warn when an override became unnecessary."""
+    overrides = json.load(open(path, encoding="utf-8"))
+    for name, o in overrides.items():
+        if name.startswith("_") or name not in docs:
+            continue
+        d = docs[name]
+        for field in ("desc", "remark"):
+            if field in o:
+                if not GERMAN_HINT.search(d[field]):
+                    print(f"note: {name}.{field} is translated in en.po now; override in translations_en.json can go")
+                d[field] = o[field]
+        for pname, text in o.get("params", {}).items():
+            for p in d["params"]:
+                if p["name"] == pname:
+                    if not GERMAN_HINT.search(p["desc"]):
+                        print(f"note: {name}({pname}) is translated in en.po now; override can go")
+                    p["desc"] = text
 
 
 def main():
@@ -168,6 +270,7 @@ def main():
 
     funcs, consts = parse_engine(a.engine_src)
     docs = parse_docs(a.lcdocs)
+    apply_overrides(docs, os.path.join(os.path.dirname(os.path.abspath(__file__)), "translations_en.json"))
     out_funcs = {}
     for name, f in sorted(funcs.items()):
         d = docs.get(name, {})
@@ -183,7 +286,6 @@ def main():
                         p["type"] = dp["type"]
         elif params is None and d.get("params"):
             params = [{"name": p["name"], "type": p["type"], "desc": p["desc"]} for p in d["params"]]
-            f["params_from_docs_only"] = True
         out_funcs[name] = {
             "params": params,
             "rtype": d.get("rtype") or f["rtype"],
@@ -196,7 +298,7 @@ def main():
     data = {"functions": out_funcs, "constants": consts,
             "documented_only": sorted(n for n in docs if n not in funcs)}
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
-    with open(a.out, "w", encoding="utf-8") as fh:
+    with open(a.out, "w", encoding="utf-8", newline="\n") as fh:
         json.dump(data, fh, ensure_ascii=False, indent=0, sort_keys=True)
     # System.c4g is always loaded by the engine: embed its scripts so the server knows its global functions
     sys_dir = os.path.join(a.engine_src, "..", "planet", "System.c4g")
@@ -207,7 +309,7 @@ def main():
             scripts[os.path.basename(f)] = raw.decode("utf-8")
         except UnicodeDecodeError:
             scripts[os.path.basename(f)] = raw.decode("cp1252")
-    with open(a.system_out, "w", encoding="utf-8") as fh:
+    with open(a.system_out, "w", encoding="utf-8", newline="\n") as fh:
         json.dump(scripts, fh, ensure_ascii=False, indent=0, sort_keys=True)
     print(f"{len(scripts)} System.c4g scripts -> {a.system_out}")
     print(f"{len(out_funcs)} engine functions ({sum(f['documented'] for f in out_funcs.values())} documented), "
