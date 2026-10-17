@@ -29,7 +29,7 @@ pub fn target_at<'t>(tree: &'t Tree, src: &str, li: &LineIndex, pos: Position) -
                 "method_call" if parent.child_by_field_name("name").map(|x| x.id()) == Some(n.id()) => {
                     Some(Target::Call { name: text, arrow: is_arrow_call(&parent), node: parent })
                 }
-                "function_definition" if parent.child_by_field_name("name").map(|x| x.id()) == Some(n.id()) => {
+                "function_definition" | "old_function_definition" if parent.child_by_field_name("name").map(|x| x.id()) == Some(n.id()) => {
                     Some(Target::FuncDef { name: text })
                 }
                 _ => Some(Target::Ident { name: text, node: n }),
@@ -64,6 +64,11 @@ fn call_targets<'a>(index: &'a Index, info: &'a FileInfo, name: &str, arrow: boo
     let visible = index.visible_funcs(info, name);
     if !arrow && !visible.is_empty() {
         return visible;
+    }
+    // a direct call that no visible script defines goes to the engine function: don't offer unrelated scripts
+    // (e.g. a System.c4g overload of another pack this scenario doesn't load)
+    if !arrow && ENGINE.functions.contains_key(name) {
+        return Vec::new();
     }
     let mut all = index.reachable_funcs(&info.path, name);
     if all.is_empty() {
@@ -245,7 +250,7 @@ pub fn references(index: &Index, info: &FileInfo, tree: &Tree, src: &str, pos: P
 fn enclosing_function<'t>(n: &Node<'t>) -> Option<Node<'t>> {
     let mut cur = n.parent();
     while let Some(c) = cur {
-        if c.kind() == "function_definition" {
+        if c.kind() == "function_definition" || c.kind() == "old_function_definition" {
             return Some(c);
         }
         cur = c.parent();

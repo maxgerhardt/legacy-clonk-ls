@@ -18,6 +18,8 @@ module.exports = grammar({
     conflicts: $ => [
         [$._for_iterators, $.var_scope],
         [$.func_desc, $.map_access],
+        // old-style function bodies end where the next "Name:" starts (needs 2 tokens of lookahead: GLR)
+        [$.old_function_definition],
     ],
 
     rules: {
@@ -28,8 +30,17 @@ module.exports = grammar({
             $.pragma_strict,
             $.appendto,
             $.function_definition,
+            $.old_function_definition,
             $.var_definition,
             $.include,
+        ),
+
+        // old style: [access] Name: statements... until the next declaration (C4AulParse Parse_FuncHead, any #strict)
+        old_function_definition: $ => seq(
+            optional(field("visibility", $.visibility)),
+            field("name", $.identifier),
+            ':',
+            repeat($._statement),
         ),
 
         function_definition: $ => seq(
@@ -116,6 +127,7 @@ module.exports = grammar({
         )),
 
         _statement: $ => choice(
+            $.block,
             $.func_desc,
             $.return_statement,
             $.if_statement,
@@ -143,10 +155,7 @@ module.exports = grammar({
             '(',
             $._for_variations,
             ')',
-            choice(
-                $._statement,
-                $.block,
-            ),
+            $._statement,
         )),
 
         _for_iterators: $ => choice(
@@ -187,10 +196,7 @@ module.exports = grammar({
             '(',
             $._expression,
             ')',
-            choice(
-                $._statement,
-                $.block,
-            ),
+            $._statement,
         )),
 
         return_statement: $ => seq(
@@ -212,16 +218,10 @@ module.exports = grammar({
             '(',
             $._expression,
             ')',
-            choice(
-                $._statement,
-                $.block,
-            ),
+            $._statement,
             optional(seq(
                 $.else,
-                choice(
-                    $._statement,
-                    $.block,
-                ),
+                $._statement,
             )),
         )),
 
@@ -243,6 +243,7 @@ module.exports = grammar({
             $.builtin_constant,
             $.map,
             $.map_access,
+            $.array_append,
             $.translation,
         )),
 
@@ -261,6 +262,7 @@ module.exports = grammar({
             $.builtin_constant,
             $.map,
             $.map_access,
+            $.array_append,
             $.translation,
         )),
 
@@ -284,15 +286,17 @@ module.exports = grammar({
             ')',
         ),
 
+        // '?' = nil-safe navigation (#strict 3): obj?->Foo(), map?.key, arr?[i]
         arrow_expression: $ => seq(
             $._expression,
+            optional('?'),
             '->',
             optional('~'),
             $.method_call,
         ),
 
+        // NO_OWNER is an engine constant (an identifier): old scripts call constants like functions, NO_OWNER()
         builtin_constant: $ => choice(
-            'NO_OWNER',
             // 'DIR_LEFT',
             // 'DIR_RIGHT',
             'global',
@@ -366,6 +370,7 @@ module.exports = grammar({
             '[',
             optional($._expression),
             repeat(seq(',', $._expression)),
+            optional(','),
             ']',
         )),
 
@@ -390,15 +395,19 @@ module.exports = grammar({
         ),
 
         map_access: $ => choice(
-            seq($._expression, '.', $.identifier),
-            seq($._expression, '[', $._expression, ']'),
+            seq($._expression, optional('?'), '.', $.identifier),
+            seq($._expression, optional('?'), '[', $._expression, ']'),
         ),
 
-        string: $ => seq(
+        // arr[] = x appends (any #strict level, C4AulParse AB_ARRAY_APPEND)
+        array_append: $ => prec(2, seq($._expression, '[', ']')),
+
+        // one token: otherwise "// ..." inside a string is lexed as a comment (extras) between '"' and the content
+        string: $ => token(seq(
             '"',
-            /[^"]*(\\\"[^"]*)*/,
+            /([^"\\]|\\.)*/,
             '"',
-        ),
+        )),
 
         id: $ => idRe,
 
@@ -422,6 +431,8 @@ module.exports = grammar({
                 /[^*]*\*+([^/*][^*]*\*+)*/,
                 '/',
             ),
+            // an unterminated /* runs to the end of the file (the engine accepts that)
+            seq('/*', /([^*]|\*+[^*/])*\**/),
         )),
     },
 });

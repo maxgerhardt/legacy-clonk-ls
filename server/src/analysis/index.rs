@@ -94,6 +94,43 @@ pub struct Index {
     pub scenario_packs: HashMap<String, Vec<String>>,
     /// Extra folders indexed because a script inside them was opened (see `cover`)
     pub covered: Vec<PathBuf>,
+    /// Name tables for fast lookups, built on first use and reset by every change of `files`
+    lookup: std::sync::OnceLock<Lookup>,
+}
+
+/// Name -> (file key, index into FileInfo::funcs/vars) tables, so lookups don't scan all files.
+#[derive(Default)]
+struct Lookup {
+    funcs: HashMap<String, Vec<(String, usize)>>,
+    globals: HashMap<String, Vec<(String, usize)>>,
+    statics: HashMap<String, Vec<(String, usize)>>,
+    /// #appendto target ID (or "*") -> scripts appending to it
+    appenders: HashMap<String, Vec<String>>,
+}
+
+impl Lookup {
+    fn build(files: &HashMap<String, FileInfo>) -> Lookup {
+        let mut l = Lookup::default();
+        for (key, f) in files {
+            for (i, func) in f.funcs.iter().enumerate() {
+                l.funcs.entry(func.name.clone()).or_default().push((key.clone(), i));
+                // only 'global func' is global, also in System.c4g: a plain func there belongs to its script
+                // (C4AulFuncMap::GetFunc looks up by owner; oracle case TS27: "unknown identifier" from a definition)
+                if func.visibility.as_deref() == Some("global") {
+                    l.globals.entry(func.name.clone()).or_default().push((key.clone(), i));
+                }
+            }
+            for (i, v) in f.vars.iter().enumerate() {
+                if v.kind != VarKind::Local {
+                    l.statics.entry(v.name.clone()).or_default().push((key.clone(), i));
+                }
+            }
+            for t in &f.appendto {
+                l.appenders.entry(t.clone()).or_default().push(key.clone());
+            }
+        }
+        l
+    }
 }
 
 pub fn path_key(p: &Path) -> String {
@@ -121,6 +158,113 @@ fn in_system_group(p: &Path) -> bool {
     p.ancestors().skip(1).any(|a| {
         a.file_name().map(|n| n.to_string_lossy().eq_ignore_ascii_case("System.c4g")).unwrap_or(false)
     })
+}
+
+fn is_system_path(p: &Path) -> bool {
+    in_system_group(p)
+}
+
+/// Files of interest found by `collect_dir` (phase 1 of indexing).
+#[derive(Default)]
+struct Found {
+    scripts: Vec<PathBuf>,
+    defcores: Vec<PathBuf>,
+    scenarios: Vec<PathBuf>,
+}
+
+/// Walk `dir` and remember scripts, DefCore.txt and Scenario.txt. Uses the directory entry's file type
+/// (no extra stat per entry, which is slow on Windows).
+fn collect_dir(dir: &Path, seen: &mut HashSet<String>, found: &mut Found) {
+    if !seen.insert(path_key(dir)) {
+        return;
+    }
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let is_dir = match entry.file_type() {
+            Ok(t) if t.is_symlink() => entry.path().is_dir(),
+            Ok(t) => t.is_dir(),
+            Err(_) => false,
+        };
+        if is_dir {
+            if [".git", "target", "node_modules", ".claude"].contains(&name.as_ref()) {
+                continue;
+            }
+            collect_dir(&entry.path(), seen, found);
+        } else if name.eq_ignore_ascii_case("DefCore.txt") {
+            found.defcores.push(entry.path());
+        } else if name.eq_ignore_ascii_case("Scenario.txt") {
+            found.scenarios.push(entry.path());
+        } else if name.len() > 2 && name[name.len() - 2..].eq_ignore_ascii_case(".c") {
+            // the engine only loads Script.c of definitions/scenarios and the *.c files of System.c4g groups
+            let p = entry.path();
+            if is_clonk_script(&p) && (name.eq_ignore_ascii_case("Script.c") || in_system_group(&p)) {
+                found.scripts.push(p);
+            }
+        }
+    }
+}
+
+/// Map `f` over `items` on all CPU cores and keep the input order. Threads take the next item from a shared
+/// counter, so a few huge files (e.g. 2 MB generated map scripts) don't stall one thread's share.
+/// `init` creates per-thread state (e.g. a tree-sitter parser).
+fn par_map<T: Sync, S, R: Send>(items: &[T], init: impl Fn() -> S + Sync, f: impl Fn(&mut S, &T) -> Option<R> + Sync) -> Vec<R> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(1, 16).min(items.len().max(1));
+    let next = AtomicUsize::new(0);
+    let mut results: Vec<(usize, R)> = std::thread::scope(|s| {
+        let handles: Vec<_> = (0..threads)
+            .map(|_| {
+                s.spawn(|| {
+                    let mut state = init();
+                    let mut out = vec![];
+                    loop {
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        if i >= items.len() {
+                            break;
+                        }
+                        if let Some(r) = f(&mut state, &items[i]) {
+                            out.push((i, r));
+                        }
+                    }
+                    out
+                })
+            })
+            .collect();
+        handles.into_iter().flat_map(|h| h.join().unwrap_or_default()).collect()
+    });
+    results.sort_by_key(|(i, _)| *i);
+    results.into_iter().map(|(_, r)| r).collect()
+}
+
+/// Read, parse and extract the scripts on all CPU cores (one tree-sitter parser per thread).
+fn parse_scripts_parallel(paths: &[PathBuf]) -> Vec<(String, FileInfo)> {
+    par_map(paths, new_parser, |parser, p| {
+        let src = decode_bytes(&std::fs::read(p).ok()?);
+        let tree = parser.parse(&src, None)?;
+        Some((path_key(p), extract(p, &src, &tree)))
+    })
+}
+
+/// DefCore.txt facts for the ID table (read in parallel; inserted in walk order by `add_found`).
+fn read_defcore(p: &Path) -> Option<IdInfo> {
+    let text = decode_bytes(&std::fs::read(p).ok()?);
+    let (mut id, mut name, mut line) = (None, None, 0);
+    for (i, l) in text.lines().enumerate() {
+        let l = l.trim();
+        if let Some(v) = l.strip_prefix("id=") {
+            id = Some(v.trim().to_string());
+            line = i as u32;
+        } else if let Some(v) = l.strip_prefix("Name=") {
+            name = Some(v.trim().to_string());
+        }
+    }
+    let script = p.parent().map(|d| d.join("Script.c")).filter(|s| s.exists());
+    Some(IdInfo { id: id?, name, defcore: p.to_path_buf(), line, script })
 }
 
 const EMBEDDED_SYSTEM: &str = include_str!("../core/system_scripts.json");
@@ -195,7 +339,7 @@ pub fn extract(path: &Path, src: &str, tree: &Tree) -> FileInfo {
     let mut stack = vec![tree.root_node()];
     while let Some(n) = stack.pop() {
         match n.kind() {
-            "function_definition" => {
+            "function_definition" | "old_function_definition" => {
                 if let Some(name) = n.child_by_field_name("name") {
                     let mut params = vec![];
                     for c in named_children(&n) {
@@ -286,50 +430,51 @@ fn doc_comment(n: &Node, src: &str) -> Option<String> {
 
 impl Index {
     pub fn build(roots: Vec<PathBuf>) -> Index {
+        let timing = std::env::var_os("C4LS_TIMING").is_some();
+        let t0 = std::time::Instant::now();
         let mut index = Index { roots: roots.clone(), ..Default::default() };
-        let mut parser = new_parser();
         let mut seen = HashSet::new();
+        let mut found = Found::default();
         for root in roots {
-            index.scan_dir(&root, &mut parser, &mut seen);
+            collect_dir(&root, &mut seen, &mut found);
         }
         // The engine always loads System.c4g; if the roots don't contain one, use the embedded copy
-        if !index.files.values().any(|f| f.is_system) {
+        if !found.scripts.iter().any(|p| is_system_path(p)) {
             if let Some(dir) = extract_embedded_system_group() {
-                index.scan_dir(&dir, &mut parser, &mut seen);
+                collect_dir(&dir, &mut seen, &mut found);
             }
+        }
+        let t_walk = t0.elapsed();
+        let counts = (found.scripts.len(), found.defcores.len(), found.scenarios.len());
+        index.add_found(found);
+        if timing {
+            eprintln!("[timing] index: walk {:?} ({} scripts, {} DefCores, {} scenarios), read+parse+extract {:?}",
+                t_walk, counts.0, counts.1, counts.2, t0.elapsed() - t_walk);
         }
         index
     }
 
-    fn scan_dir(&mut self, dir: &Path, parser: &mut Parser, seen: &mut HashSet<String>) {
-        let key = path_key(dir);
-        if !seen.insert(key) {
-            return;
+    fn scan_dir(&mut self, dir: &Path, _parser: &mut Parser, seen: &mut HashSet<String>) {
+        let mut found = Found::default();
+        collect_dir(dir, seen, &mut found);
+        self.add_found(found);
+    }
+
+    fn add_found(&mut self, found: Found) {
+        let t = std::time::Instant::now();
+        for info in par_map(&found.defcores, || (), |_, p| read_defcore(p)) {
+            self.add_id(info);
         }
-        let entries = match std::fs::read_dir(dir) {
-            Ok(e) => e,
-            Err(_) => return,
-        };
-        for entry in entries.flatten() {
-            let p = entry.path();
-            let name = entry.file_name().to_string_lossy().to_string();
-            if p.is_dir() {
-                if [".git", "target", "node_modules", ".claude"].contains(&name.as_str()) {
-                    continue;
-                }
-                self.scan_dir(&p, parser, seen);
-            } else if name.eq_ignore_ascii_case("DefCore.txt") {
-                self.index_defcore(&p);
-            } else if name.eq_ignore_ascii_case("Scenario.txt") {
-                self.collect_definitions(&p);
-            } else if is_clonk_script(&p) {
-                if let Ok(bytes) = std::fs::read(&p) {
-                    let src = decode_bytes(&bytes);
-                    if let Some(tree) = parser.parse(&src, None) {
-                        self.files.insert(path_key(&p), extract(&p, &src, &tree));
-                    }
-                }
-            }
+        for p in &found.scenarios {
+            self.collect_definitions(p);
+        }
+        let t_meta = t.elapsed();
+        for (key, info) in parse_scripts_parallel(&found.scripts) {
+            self.files.insert(key, info);
+        }
+        self.lookup = std::sync::OnceLock::new();
+        if std::env::var_os("C4LS_TIMING").is_some() {
+            eprintln!("[timing] DefCore+Scenario.txt {:?}, scripts {:?}", t_meta, t.elapsed() - t_meta);
         }
     }
 
@@ -401,8 +546,9 @@ impl Index {
         if packs.iter().any(|p| tk.contains(&format!("/{}/", p))) {
             return true;
         }
-        // System.c4g of the game (not of some other folder)
-        tk.contains("/system.c4g/") && prefix_through(&tk, ".c4f", false).is_none()
+        // System.c4g of the game (not of a scenario folder or a pack: a pack's System.c4g counts only if the
+        // scenario loads that pack, checked above)
+        tk.contains("/system.c4g/") && prefix_through(&tk, ".c4f", false).is_none() && prefix_through(&tk, ".c4d", false).is_none()
     }
 
     /// Does the scenario of script `from` load the pack with this file name (e.g. "Knights.c4d")?
@@ -420,8 +566,28 @@ impl Index {
     }
 
     /// First definition with this ID that the script `from` can see.
+    /// The definition with this ID a script sees. Several may be visible: the engine loads the packs first, then the
+    /// .c4f folders (outer to inner), then the scenario's own definitions, and a later one with the same ID replaces
+    /// the earlier (C4DefList::Add with overload). So the most local visible definition wins.
     pub fn id_for(&self, id: &str, from: &Path) -> Option<&IdInfo> {
-        self.ids.get(id)?.iter().find(|i| self.visible_from(from, &i.defcore))
+        let fk = path_key(from);
+        let scen = prefix_through(&fk, ".c4s", true);
+        let rank = |i: &IdInfo| -> usize {
+            let dk = path_key(&i.defcore);
+            match &scen {
+                Some(s) if dk.starts_with(s.as_str()) => usize::MAX,
+                Some(s) => folder_prefixes(s).iter().filter(|f| dk.starts_with(f.as_str())).map(|f| f.len()).max().unwrap_or(0),
+                None => 0,
+            }
+        };
+        let mut best: Option<(&IdInfo, usize)> = None;
+        for i in self.ids.get(id)?.iter().filter(|i| self.visible_from(from, &i.defcore)) {
+            let r = rank(i);
+            if best.map_or(true, |(_, b)| r > b) {
+                best = Some((i, r));
+            }
+        }
+        best.map(|(i, _)| i)
     }
 
     /// Any definition with this ID (e.g. for hovers in pack scripts).
@@ -459,6 +625,7 @@ impl Index {
         for (k, f) in other.files {
             self.files.entry(k).or_insert(f);
         }
+        self.lookup = std::sync::OnceLock::new();
         for (k, v) in other.ids {
             let list = self.ids.entry(k).or_default();
             for i in v {
@@ -479,33 +646,34 @@ impl Index {
         self.files.keys().any(|k| k.contains(&needle))
     }
 
-    fn index_defcore(&mut self, p: &Path) {
-        let text = match std::fs::read(p) {
-            Ok(b) => decode_bytes(&b),
-            Err(_) => return,
-        };
-        let (mut id, mut name, mut line) = (None, None, 0);
-        for (i, l) in text.lines().enumerate() {
-            let l = l.trim();
-            if let Some(v) = l.strip_prefix("id=") {
-                id = Some(v.trim().to_string());
-                line = i as u32;
-            } else if let Some(v) = l.strip_prefix("Name=") {
-                name = Some(v.trim().to_string());
-            }
-        }
-        if let Some(id) = id {
-            let script = p.parent().map(|d| d.join("Script.c")).filter(|s| s.exists());
-            let list = self.ids.entry(id.clone()).or_default();
-            if !list.iter().any(|x| path_key(&x.defcore) == path_key(p)) {
-                // workspace roots are scanned first, so their definitions come first
-                list.push(IdInfo { id, name, defcore: p.to_path_buf(), line, script });
-            }
+    fn add_id(&mut self, info: IdInfo) {
+        let list = self.ids.entry(info.id.clone()).or_default();
+        let key = path_key(&info.defcore);
+        if !list.iter().any(|x| path_key(&x.defcore) == key) {
+            // workspace roots are scanned first, so their definitions come first
+            list.push(info);
         }
     }
 
     pub fn update_file(&mut self, info: FileInfo) {
         self.files.insert(path_key(&info.path), info);
+        self.lookup = std::sync::OnceLock::new();
+    }
+
+    fn lookup(&self) -> &Lookup {
+        self.lookup.get_or_init(|| Lookup::build(&self.files))
+    }
+
+    /// (file, item index) pairs of a lookup table entry
+    fn resolve<'a>(&'a self, entries: Option<&'a Vec<(String, usize)>>) -> impl Iterator<Item = (&'a FileInfo, usize)> + 'a {
+        entries.into_iter().flatten().filter_map(move |(k, i)| self.files.get(k).map(|f| (f, *i)))
+    }
+
+    /// Does `info` #include/#appendto a definition whose script isn't indexed (e.g. from a pack we don't have)?
+    /// Then its visible functions and locals are unknown.
+    pub fn has_unresolved_targets(&self, info: &FileInfo) -> bool {
+        info.includes.iter().chain(info.appendto.iter().filter(|t| t.as_str() != "*"))
+            .any(|id| self.script_of(id, &info.path).is_none() && self.id_for(id, &info.path).map_or(true, |i| i.script.is_some()))
     }
 
     fn script_of(&self, id: &str, from: &Path) -> Option<&FileInfo> {
@@ -532,12 +700,12 @@ impl Index {
                 }
             }
             if let Some(own) = &f.def_id {
-                for other in self.files.values() {
-                    if !self.visible_from(&info.path, &other.path) {
-                        continue;
-                    }
-                    if other.appendto.iter().any(|t| t == own || (t == "*" && f.def_id.is_some())) {
-                        todo.push(other);
+                let lk = self.lookup();
+                for key in lk.appenders.get(own).into_iter().flatten().chain(lk.appenders.get("*").into_iter().flatten()) {
+                    if let Some(other) = self.files.get(key) {
+                        if self.visible_from(&info.path, &other.path) {
+                            todo.push(other);
+                        }
                     }
                 }
             }
@@ -547,15 +715,10 @@ impl Index {
 
     /// Global functions named `name` that the script `from` can see.
     pub fn global_funcs<'a>(&'a self, from: &Path, name: &str) -> Vec<(&'a FileInfo, &'a FuncDef)> {
-        let mut out = vec![];
-        for f in self.files.values().filter(|f| self.visible_from(from, &f.path)) {
-            for func in &f.funcs {
-                if func.name == name && (f.is_system || func.visibility.as_deref() == Some("global")) {
-                    out.push((f, func));
-                }
-            }
-        }
-        out
+        self.resolve(self.lookup().globals.get(name))
+            .filter(|(f, _)| self.visible_from(from, &f.path))
+            .map(|(f, i)| (f, &f.funcs[i]))
+            .collect()
     }
 
     /// Functions named `name` in any script the script `from` can see (targets of `obj->Name()` calls).
@@ -564,15 +727,7 @@ impl Index {
     }
 
     pub fn all_funcs<'a>(&'a self, name: &str) -> Vec<(&'a FileInfo, &'a FuncDef)> {
-        let mut out = vec![];
-        for f in self.files.values() {
-            for func in &f.funcs {
-                if func.name == name {
-                    out.push((f, func));
-                }
-            }
-        }
-        out
+        self.resolve(self.lookup().funcs.get(name)).map(|(f, i)| (f, &f.funcs[i])).collect()
     }
 
     /// Functions named `name` that a direct call from `info` would reach (engine functions excluded).
@@ -605,11 +760,9 @@ impl Index {
             }
         }
         if out.is_empty() {
-            for f in self.files.values().filter(|f| self.visible_from(&info.path, &f.path)) {
-                for v in &f.vars {
-                    if v.name == name && v.kind != VarKind::Local {
-                        out.push((f, v));
-                    }
+            for (f, i) in self.resolve(self.lookup().statics.get(name)) {
+                if self.visible_from(&info.path, &f.path) {
+                    out.push((f, &f.vars[i]));
                 }
             }
         }

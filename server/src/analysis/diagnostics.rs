@@ -34,8 +34,19 @@ pub fn diagnose(index: &Index, info: &FileInfo, src: &str, tree: &Tree) -> Vec<D
         out.push(diag(Default::default(), DiagnosticSeverity::INFORMATION, "no-strict",
             "no #strict directive: legacy (non-strict) syntax rules apply; new scripts should start with #strict 2".to_string()));
     }
-    let mut ctx = Ctx { index, info, src, li: &li, out: &mut out, locals: HashSet::new(), strict, func: None };
+    let unresolved_scope = index.has_unresolved_targets(info);
+    let mut ctx = Ctx { index, info, src, li: &li, out: &mut out, locals: HashSet::new(), strict, func: None,
+        func_start: (0, 0), unresolved_scope };
     ctx.walk(tree.root_node());
+    // The engine doesn't report errors in System.c4g scripts that are pure #appendto scripts (C4AulParse Warn/
+    // ParseFn: "do not show errors for System.c4g scripts that appear to be pure #appendto scripts"), but the
+    // broken function still isn't compiled: report them as warnings.
+    if info.is_system && !info.appendto.is_empty() {
+        for d in out.iter_mut().filter(|d| d.severity == Some(DiagnosticSeverity::ERROR)) {
+            d.severity = Some(DiagnosticSeverity::WARNING);
+            d.message.push_str(" (System.c4g #appendto script: the engine hides this error, but the function isn't compiled)");
+        }
+    }
     out
 }
 
@@ -81,6 +92,10 @@ struct Ctx<'a> {
     strict: u8,
     /// name of the function being walked
     func: Option<String>,
+    /// start (row, column) of the function being walked
+    func_start: (usize, usize),
+    /// an #include/#appendto target of this script isn't indexed: its functions/locals are unknown
+    unresolved_scope: bool,
 }
 
 impl<'a> Ctx<'a> {
@@ -93,9 +108,10 @@ impl<'a> Ctx<'a> {
             return;
         }
         match n.kind() {
-            "function_definition" => {
+            "function_definition" | "old_function_definition" => {
                 self.locals = function_locals(&n, self.src);
                 self.func = n.child_by_field_name("name").map(|x| node_text(&x, self.src).to_string());
+                self.func_start = (n.start_position().row, n.start_position().column);
                 for c in named_children(&n) {
                     self.walk(c);
                 }
@@ -105,6 +121,11 @@ impl<'a> Ctx<'a> {
             }
             "array" if self.strict == 0 => self.strict_error(&n, "unexpected '[' (array literals need #strict)"),
             "map" if self.strict < 3 => self.strict_error(&n, "unexpected '{' (map literals need #strict 3)"),
+            "array_append" if self.strict == 0 => self.strict_error(&n, "unexpected '[' (arr[] = x needs #strict)"),
+            // nil-safe navigation obj?->F(), map?.key, arr?[i]: C4AulParse ATT_QMARK
+            "arrow_expression" | "map_access" if self.strict < 3 && super::index::children(&n).iter().any(|c| c.kind() == "?") => {
+                self.strict_error(&n, "unexpected '?' (nil-safe navigation needs #strict 3)")
+            }
             "map_access" if self.strict < 3 && super::index::children(&n).iter().any(|c| c.kind() == ".") => {
                 self.strict_error(&n, "unexpected '.' (map access with '.' needs #strict 3)")
             }
@@ -173,6 +194,9 @@ impl<'a> Ctx<'a> {
             return;
         }
         if let Some(ef) = ENGINE.functions.get(name) {
+            if self.strict >= 3 {
+                self.check_literal_nothing(n, name, ef);
+            }
             if let (true, Some(ps)) = (ef.arity_known, &ef.params) {
                 if args > ps.len() {
                     self.out.push(diag(range, DiagnosticSeverity::WARNING, "too-many-params",
@@ -192,13 +216,41 @@ impl<'a> Ctx<'a> {
                 name, f.path.display()),
             (None, None) => format!("unknown identifier: {} (not an engine function and not defined in any indexed script)", name),
         };
+        if self.unresolved_scope {
+            return; // the missing #include/#appendto target may define it
+        }
         self.out.push(diag(range, DiagnosticSeverity::ERROR, "unknown-identifier", msg));
+    }
+
+    /// #strict 3: `0`/`true`/`false` are int/bool values, no longer "nothing". Passed to an engine parameter of type
+    /// object/string/array/map the call fails at runtime ("call to "F" parameter N: got "int", but expected
+    /// "object"!", C4Value::C4ScriptCnvMap: int/bool -> object/string/array/map = NEVER; int -> id is allowed).
+    fn check_literal_nothing(&mut self, call: &Node, name: &str, ef: &super::engine::EngineFunc) {
+        let (Some(args), Some(params)) = (call.child_by_field_name("args"), &ef.params) else { return };
+        let args: Vec<Node> = named_children(&args).into_iter().filter(|c| c.kind() != "comment").collect();
+        for (i, (arg, p)) in args.iter().zip(params.iter()).enumerate() {
+            let literal = match arg.kind() {
+                "number" => "an int",
+                "bool" => "a bool",
+                _ => continue,
+            };
+            if !matches!(p.ty.as_str(), "object" | "string" | "array" | "map") {
+                continue;
+            }
+            let text = node_text(arg, self.src);
+            self.out.push(diag(self.li.node_range(arg), DiagnosticSeverity::WARNING, "strict3-nothing",
+                format!("{}: parameter {} ({}) expects {}, but {} is {} in #strict 3 (not 'nothing'): pass nil instead; the call fails at runtime",
+                    name, i + 1, p.name, p.ty, text, literal)));
+        }
     }
 
     /// Is there another definition of function `f` that `inherited` could call?
     fn has_overloaded(&self, f: &str) -> bool {
         let own = super::index::path_key(&self.info.path);
-        self.index.scope_files(self.info).iter().any(|file| super::index::path_key(&file.path) != own && file.funcs.iter().any(|x| x.name == f))
+        // a second definition of a function in the same script overloads the first one (C4Aul: later wins)
+        let (row, col) = self.func_start;
+        self.info.funcs.iter().any(|x| x.name == f && (x.range.start.line as usize, x.range.start.character as usize) < (row, col))
+            || self.index.scope_files(self.info).iter().any(|file| super::index::path_key(&file.path) != own && file.funcs.iter().any(|x| x.name == f))
             || !self.index.global_funcs(&self.info.path, f).is_empty()
             || ENGINE.functions.contains_key(f)
     }
@@ -210,7 +262,7 @@ impl<'a> Ctx<'a> {
         };
         // declarations and non-variable positions
         match parent.kind() {
-            "method_call" | "function_definition" | "param" | "visibility" | "map_key" | "map_entry" => return,
+            "method_call" | "function_definition" | "old_function_definition" | "param" | "visibility" | "map_key" | "map_entry" => return,
             "var_assignment" if named_children(&parent).first().map(|f| f.id() == n.id()).unwrap_or(false) => return,
             "map_access" => {
                 // obj.key: the key is not a variable
@@ -238,6 +290,9 @@ impl<'a> Ctx<'a> {
             if next.kind() == ":" {
                 return;
             }
+        }
+        if self.unresolved_scope {
+            return; // the missing #include/#appendto target may define it as a local
         }
         self.out.push(diag(self.li.node_range(n), DiagnosticSeverity::ERROR, "unknown-identifier",
             format!("unknown identifier: {} (no local variable, parameter, local/static variable or constant with this name)", name)));
@@ -301,6 +356,18 @@ fn function_locals(f: &Node, src: &str) -> HashSet<String> {
                 for w in kids.windows(3) {
                     if w[0].kind() == "identifier" && w[1].kind() == "," && w[2].kind() == "identifier" {
                         out.insert(node_text(&w[2], src).to_string());
+                    }
+                }
+                // 'var' is optional: for (x in list) / for (k, v in map) also declare x / k, v
+                // (C4AulParse Parse_ForEach adds the names to the function's variables)
+                for w in kids.windows(2) {
+                    if w[0].kind() == "identifier" && w[1].kind() == "in" {
+                        out.insert(node_text(&w[0], src).to_string());
+                    }
+                }
+                for w in kids.windows(4) {
+                    if w[0].kind() == "identifier" && w[1].kind() == "," && w[2].kind() == "identifier" && w[3].kind() == "in" {
+                        out.insert(node_text(&w[0], src).to_string());
                     }
                 }
             }
