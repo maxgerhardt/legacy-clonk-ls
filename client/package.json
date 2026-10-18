@@ -99,6 +99,16 @@
 					"type": "boolean",
 					"default": true,
 					"description": "Track which definition an object variable holds (CreateObject(ID, ...), FindObject2(Find_ID(ID)), this, ...) so obj->F() resolves to exactly that definition's functions: hover, go to definition, return types, parameter checks, and a warning when the definition has no such function. Unknown objects behave as before. Needs typeChecks."
+				},
+				"legacy-clonk-ext.assumeCreateSucceeds": {
+					"type": "boolean",
+					"default": true,
+					"description": "Assume CreateObject, CreateContents, CreateConstruction, PlaceAnimal, PlaceVegetation and ComposeContents always give an object (type object instead of object | nil). They fail only in exceptional cases (invalid ID, the object removes itself in Initialize). Off: their results count as maybe nil (also for nilChecks)."
+				},
+				"legacy-clonk-ext.nilChecks": {
+					"type": "boolean",
+					"default": false,
+					"description": "Warn about obj->F() where obj may be nil: it comes from a function that can find nothing (FindObject, FindObject2, Contained, Contents, GetCursor, ...) and no if (obj) / if (!obj) return; guards the call. nil->F() stops the script (also with ->~); obj?->F() is nil-safe. Needs typeChecks."
 				}
 			}
 		},

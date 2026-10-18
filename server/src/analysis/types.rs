@@ -114,6 +114,10 @@ pub fn engine_return(name: &str) -> Option<Ty> {
         "Format" => return Some(STRING),
         "FindObjects" => return Some(array_of(OBJECT)),
         "CreateArray" => return Some(array_of(NIL)),
+        // creating an object fails only in exceptional cases (invalid ID, removed in Initialize): assumed to work
+        // (switch: diagnostics::assume_create_succeeds) -> object, not object | nil
+        "CreateObject" | "CreateContents" | "CreateConstruction" | "PlaceAnimal" | "PlaceVegetation" | "ComposeContents"
+            if super::diagnostics::assume_create_succeeds() => return Some(OBJECT),
         _ => {}
     }
     let t = from_name(if ef.ertype.is_empty() { &ef.rtype } else { &ef.ertype });
@@ -372,13 +376,14 @@ impl<'a> Infer<'a> {
                 self.expr(*cond, &mut s);
                 let else_at = nc.iter().position(|c| c.kind() == "else");
                 let then = nc.get(1).filter(|c| c.kind() != "else");
+                let (st, sf) = (self.narrow(cond, &s, true), self.narrow(cond, &s, false));
                 let a = match then {
-                    Some(t) => self.stmt(*t, s.clone()),
-                    None => s.clone(),
+                    Some(t) => self.stmt(*t, st),
+                    None => st,
                 };
                 let b = match else_at.and_then(|i| nc.get(i + 1)) {
-                    Some(e) => self.stmt(*e, s),
-                    None => s,
+                    Some(e) => self.stmt(*e, sf),
+                    None => sf,
                 };
                 merge(a, b)
             }
@@ -474,16 +479,20 @@ impl<'a> Infer<'a> {
                 self.expr(c, &mut after_cond);
             }
             self.loops.push((None, None));
+            let (into, out_of) = match cond {
+                Some(c) => (self.narrow(&c, &after_cond, true), self.narrow(&c, &after_cond, false)),
+                None => (after_cond.clone(), after_cond.clone()),
+            };
             let out = match body {
-                Some(b) => self.stmt(b, after_cond.clone()),
-                None => after_cond.clone(),
+                Some(b) => self.stmt(b, into),
+                None => into,
             };
             let (brk, cont) = self.loops.pop().unwrap_or((None, None));
             let mut end = merge(out, cont);
             if let Some(u) = update {
                 self.expr(u, &mut end);
             }
-            exit = merge(after_cond, brk);
+            exit = merge(out_of, brk);
             let next = merge(s.clone(), end);
             if next == entry {
                 break;
@@ -491,6 +500,55 @@ impl<'a> Infer<'a> {
             entry = next;
         }
         exit
+    }
+
+    /// The state where `cond` is `truth`: a variable that is true there isn't nil (`x`, `x != nil`, `x = F()`, `!`,
+    /// `&&`, `||`, `x == nil` being false).
+    fn narrow(&self, cond: &Node, s: &Option<State>, truth: bool) -> Option<State> {
+        let mut out = s.clone();
+        if let Some(st) = out.as_mut() {
+            self.narrow_into(cond, st, truth);
+        }
+        out
+    }
+
+    fn narrow_into(&self, cond: &Node, st: &mut State, truth: bool) {
+        let nc: Vec<Node> = named_children(cond).into_iter().filter(|c| c.kind() != "comment").collect();
+        let op = children(cond).iter().find(|c| !c.is_named() && !matches!(c.kind(), "(" | ")")).map(|c| c.kind().to_string()).unwrap_or_default();
+        let not_nil = |n: &Node, st: &mut State| {
+            if n.kind() == "identifier" && self.locals.contains(self.text(n)) {
+                if let Some(t) = st.get_mut(self.text(n)) {
+                    if *t & NIL != 0 && *t & !NIL != 0 {
+                        *t &= !NIL;
+                    }
+                }
+            }
+        };
+        match (cond.kind(), op.as_str()) {
+            ("identifier", _) if truth => not_nil(cond, st),
+            ("unary_expression", "!") => {
+                if let Some(x) = nc.first() {
+                    self.narrow_into(x, st, !truth);
+                }
+            }
+            ("binary_expression", "=") if truth => {
+                if let Some(x) = nc.first() {
+                    not_nil(x, st);
+                }
+            }
+            ("binary_expression", "&&") if truth => nc.iter().for_each(|x| self.narrow_into(x, st, true)),
+            ("binary_expression", "||") if !truth => nc.iter().for_each(|x| self.narrow_into(x, st, false)),
+            ("binary_expression", "!=" | "==") if (op == "!=") == truth => {
+                if let (Some(a), Some(b)) = (nc.first(), nc.get(1)) {
+                    match (a.kind(), b.kind()) {
+                        (_, "nil") => not_nil(a, st),
+                        ("nil", _) => not_nil(b, st),
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
     fn assign(&mut self, lhs: &Node, t: Ty, s: &mut Option<State>) {
@@ -727,7 +785,8 @@ impl<'a> Infer<'a> {
             }
             "&&" | "||" => {
                 let tl = self.expr(l, s);
-                let mut s2 = s.clone();
+                // the right side runs only when the left one is true (&&) / false (||), from #strict 2 on
+                let mut s2 = if self.strict >= 2 { self.narrow(&l, s, op == "&&") } else { s.clone() };
                 let tr = self.expr(r, &mut s2); // only evaluated sometimes
                 *s = merge(s.take(), s2);
                 if self.strict >= 2 { tl | tr } else { BOOL }

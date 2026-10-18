@@ -553,7 +553,7 @@ impl<'a, 't> IdCtx<'a, 't> {
 /// The expressions assigned to `name` in a function: `name = v`, `var name = v`, `name[] = v` / `name[i] = v` (an
 /// array's elements), `name ..= v`, `name ??= v`, and the collection of `for (var name in coll)`. `script_var`: only
 /// assignments where `name` isn't a parameter/var of the function.
-fn assigned_values<'t>(func: &Node<'t>, name: &str, src: &str, script_var: bool) -> Vec<Node<'t>> {
+pub(crate) fn assigned_values<'t>(func: &Node<'t>, name: &str, src: &str, script_var: bool) -> Vec<Node<'t>> {
     let mut out = vec![];
     let mut stack = vec![*func];
     let mut shadowed = false;

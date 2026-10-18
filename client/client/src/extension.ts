@@ -52,10 +52,12 @@ function configureAndStartLanguageServer(context: ExtensionContext) {
 	const typeChecks = workspace.getConfiguration(CONFIG_NAME).get<boolean>('typeChecks', true);
 	const fieldTypes = workspace.getConfiguration(CONFIG_NAME).get<boolean>('fieldTypes', true);
 	const objectIds = workspace.getConfiguration(CONFIG_NAME).get<boolean>('objectIds', true);
+	const nilChecks = workspace.getConfiguration(CONFIG_NAME).get<boolean>('nilChecks', false);
+	const assumeCreateSucceeds = workspace.getConfiguration(CONFIG_NAME).get<boolean>('assumeCreateSucceeds', true);
 	const stringTableLanguages = workspace.getConfiguration(CONFIG_NAME).get<string[]>('stringTableLanguages', ['DE', 'US']);
 	const initializationOptions = gameExecutable
-		? { gameDir: path.dirname(gameExecutable), typeChecks, fieldTypes, objectIds, stringTableLanguages }
-		: { typeChecks, fieldTypes, objectIds, stringTableLanguages };
+		? { gameDir: path.dirname(gameExecutable), typeChecks, fieldTypes, objectIds, nilChecks, assumeCreateSucceeds, stringTableLanguages }
+		: { typeChecks, fieldTypes, objectIds, nilChecks, assumeCreateSucceeds, stringTableLanguages };
 
 	const serverOptions: ServerOptions = {
 		run: {

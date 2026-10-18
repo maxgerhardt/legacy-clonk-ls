@@ -219,6 +219,9 @@ impl<'a> Ctx<'a> {
         let args = n.child_by_field_name("args").map(|a| named_children(&a).iter().filter(|c| c.kind() != "comment").count()).unwrap_or(0);
         let range = self.li.node_range(&name_node);
         if super::index::is_arrow_call(n) {
+            if nil_checks_enabled() {
+                self.check_nil_receiver(n, name);
+            }
             let failsafe = n.parent().map(|p| super::index::children(&p).iter().any(|c| c.kind() == "~")).unwrap_or(false);
             // the receiver's definitions are known (obj = CreateObject(FLNT, ...)): the call reaches exactly their
             // functions (+ global ones); none and no engine function = "Object call: No function" at runtime
@@ -427,6 +430,50 @@ impl<'a> Ctx<'a> {
                     name, i + 1, got, ty, pname, hint)));
             break; // the engine stops at the first parameter it can't convert
         }
+    }
+
+    /// nil-call: `x->F()` (also `->~`: AB_CALLFS stops on nil too) where x may be nil at this point (types.rs, after
+    /// if (x) / if (!x) return; narrowing) because it was assigned from a NIL_SOURCES function, or that function's
+    /// call itself is the receiver. The engine: "Object call: target is zero!". `x?->F()` is nil-safe.
+    fn check_nil_receiver(&mut self, call: &Node, name: &str) {
+        use super::types::{NIL, OBJECT};
+        let Some(arrow) = call.parent() else { return };
+        if super::index::children(&arrow).iter().any(|c| c.kind() == "?") {
+            return;
+        }
+        let Some(target) = named_children(&arrow).into_iter().find(|c| c.kind() != "comment") else { return };
+        let source_of = |v: &Node| -> Option<String> {
+            if v.kind() != "method_call" || super::index::is_arrow_call(v) {
+                return None;
+            }
+            let f = node_text(&v.child_by_field_name("name")?, self.src);
+            let creator = matches!(f, "CreateObject" | "CreateContents" | "CreateConstruction" | "PlaceAnimal" | "PlaceVegetation" | "ComposeContents");
+            (NIL_SOURCES.contains(&f) || (creator && !assume_create_succeeds())).then(|| f.to_string())
+        };
+        let source = match target.kind() {
+            "method_call" => source_of(&target),
+            // only function variables: a local/static has one type for the whole script, so guards don't show
+            "identifier" if self.locals.contains(node_text(&target, self.src)) => {
+                let Some(t) = self.types.as_ref().and_then(|ft| ft.at.get(&target.id()).copied()) else { return };
+                if t & NIL == 0 || t & OBJECT == 0 || t == super::types::ANY {
+                    return;
+                }
+                let Some(func) = super::objids::enclosing_function(call) else { return };
+                let var = node_text(&target, self.src);
+                super::objids::assigned_values(&func, var, self.src, false).iter().find_map(|v| source_of(v))
+            }
+            _ => None,
+        };
+        let Some(source) = source else { return };
+        let what = node_text(&target, self.src);
+        let fix = if target.kind() == "identifier" {
+            format!("check it first (if ({0}) ..., if (!{0}) return;) or call {0}?->{1}()", what, name)
+        } else {
+            format!("store it and check it, or call {}?->{}()", what, name)
+        };
+        self.out.push(diag(self.li.node_range(&target), DiagnosticSeverity::WARNING, "nil-call",
+            format!("{} may be nil here ({}() can return nil): nil->{}() stops the script (\"Object call: target is zero!\", also with ->~); {}",
+                if target.kind() == "identifier" { format!("\"{}\"", what) } else { "the result".to_string() }, source, name, fix)));
     }
 
     /// The type of an argument when it is certain, and whether the value can never be falsy.
@@ -662,6 +709,25 @@ pub static FIELD_TYPES: std::sync::atomic::AtomicBool = std::sync::atomic::Atomi
 
 /// Track which definitions objects are of (objids.rs) to resolve obj->F() calls (needs type checks on).
 pub static OBJECT_IDS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Assume CreateObject/CreateContents/... always give an object (type `object`, not `object | nil`).
+pub static ASSUME_CREATE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn assume_create_succeeds() -> bool {
+    ASSUME_CREATE.load(std::sync::atomic::Ordering::Relaxed) && std::env::var("C4LS_CREATE_MAY_FAIL").map(|v| v != "1").unwrap_or(true)
+}
+
+/// Warn about obj->F() where obj may be nil because it comes from something that can find nothing (opt-in).
+pub static NIL_CHECKS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn nil_checks_enabled() -> bool {
+    type_checks_enabled()
+        && (NIL_CHECKS.load(std::sync::atomic::Ordering::Relaxed) || std::env::var("C4LS_NIL_CHECKS").map(|v| v == "1").unwrap_or(false))
+}
+
+/// Engine functions that return nil when they find nothing (receivers checked by nil-call).
+const NIL_SOURCES: &[&str] = &["FindObject", "FindObject2", "FindObjectOwner", "FindContents", "FindBase", "FindOtherContents",
+    "Contained", "Contents", "ScrollContents", "GetCursor", "GetViewCursor", "GetCaptain", "GetCrew", "GetHiRank", "GetActionTarget"];
 
 pub fn object_ids_enabled() -> bool {
     type_checks_enabled()
