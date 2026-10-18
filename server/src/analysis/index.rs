@@ -75,6 +75,9 @@ pub struct FileInfo {
     /// script variables assigned in a function: (name, function index, member) - member = obj.name = x or
     /// LocalN("name") = x, else a plain assignment of a name that isn't a parameter/var of the function
     pub writes: Vec<(String, usize, bool)>,
+    /// script variables passed as call arguments: (name, function index, callee, argument position); a write site
+    /// when the callee has a reference parameter there (Lookup::build -> writers, Index::is_ref_param)
+    pub ref_args: Vec<(String, usize, String, usize)>,
 }
 
 #[derive(Debug, Clone)]
@@ -114,6 +117,8 @@ struct Lookup {
     includers: HashMap<String, Vec<String>>,
     /// variable name -> (script, function index, member write)
     writers: HashMap<String, Vec<(String, usize, bool)>>,
+    /// (function, argument position) of reference parameters (script &x, engine C4Value *)
+    ref_params: HashSet<(String, usize)>,
     /// lowercase names of the .c4d/.c4f folders that indexed scripts lie in (which packs are indexed)
     pack_dirs: HashSet<String>,
 }
@@ -121,6 +126,24 @@ struct Lookup {
 impl Lookup {
     fn build(files: &HashMap<String, FileInfo>) -> Lookup {
         let mut l = Lookup::default();
+        // (function, position) of every reference parameter: script &x and engine C4Value * parameters
+        let mut refs: HashSet<(String, usize)> = HashSet::new();
+        for f in files.values() {
+            for func in &f.funcs {
+                for (i, p) in func.params.iter().enumerate() {
+                    if p.0.as_deref() == Some("&") {
+                        refs.insert((func.name.clone(), i));
+                    }
+                }
+            }
+        }
+        for (name, ef) in &super::engine::ENGINE.functions {
+            for (i, p) in ef.params.iter().flatten().enumerate() {
+                if p.etype.starts_with('&') {
+                    refs.insert((name.clone(), i));
+                }
+            }
+        }
         for (key, f) in files {
             for (i, func) in f.funcs.iter().enumerate() {
                 l.funcs.entry(func.name.clone()).or_default().push((key.clone(), i));
@@ -144,6 +167,11 @@ impl Lookup {
             for (name, i, member) in &f.writes {
                 l.writers.entry(name.clone()).or_default().push((key.clone(), *i, *member));
             }
+            for (name, i, callee, pos) in &f.ref_args {
+                if refs.contains(&(callee.clone(), *pos)) && !f.writes.iter().any(|(n, j, m)| n == name && j == i && !m) {
+                    l.writers.entry(name.clone()).or_default().push((key.clone(), *i, false));
+                }
+            }
             for seg in key.split('/') {
                 let seg = seg.to_lowercase();
                 if seg.ends_with(".c4d") || seg.ends_with(".c4f") {
@@ -151,6 +179,7 @@ impl Lookup {
                 }
             }
         }
+        l.ref_params = refs;
         l
     }
 }
@@ -380,6 +409,7 @@ pub fn extract(path: &Path, src: &str, tree: &Tree) -> FileInfo {
         calls: vec![],
         id_refs: vec![],
         writes: vec![],
+        ref_args: vec![],
     };
     let mut stack = vec![tree.root_node()];
     while let Some(n) = stack.pop() {
@@ -397,8 +427,12 @@ pub fn extract(path: &Path, src: &str, tree: &Tree) -> FileInfo {
                             }
                         }
                     }
-                    for (w, member) in function_writes(&n, src) {
+                    let (writes, ref_args) = function_writes(&n, src);
+                    for (w, member) in writes {
                         info.writes.push((w, info.funcs.len(), member));
+                    }
+                    for (v, callee, pos) in ref_args {
+                        info.ref_args.push((v, info.funcs.len(), callee, pos));
                     }
                     info.funcs.push(FuncDef {
                         name: node_text(&name, src).to_string(),
@@ -460,7 +494,7 @@ const ASSIGN_OPS: &[&str] = &["=", "+=", "-=", "*=", "/=", "%=", "**=", "<<=", "
 
 /// Script variables a function assigns: plain names that aren't its parameters/vars (`n = 1`, `n++`, `n[] = x`),
 /// and other objects' locals (`obj.n = x`, `LocalN("n", obj) = x`) as member writes.
-fn function_writes(f: &Node, src: &str) -> Vec<(String, bool)> {
+fn function_writes(f: &Node, src: &str) -> (Vec<(String, bool)>, Vec<(String, String, usize)>) {
     let mut locals = HashSet::new();
     let mut stack = vec![*f];
     while let Some(n) = stack.pop() {
@@ -488,8 +522,19 @@ fn function_writes(f: &Node, src: &str) -> Vec<(String, bool)> {
             out.push((name.to_string(), member));
         }
     };
+    let mut ref_args: Vec<(String, String, usize)> = vec![];
     let mut stack = vec![*f];
     while let Some(n) = stack.pop() {
+        if n.kind() == "method_call" {
+            let callee = n.child_by_field_name("name").map(|x| node_text(&x, src).to_string()).unwrap_or_default();
+            let args = n.child_by_field_name("args").map(|a| named_children(&a)).unwrap_or_default();
+            for (pos, a) in args.iter().filter(|c| c.kind() != "comment").enumerate() {
+                let name = node_text(a, src);
+                if a.kind() == "identifier" && !locals.contains(name) && name != "this" && !ref_args.iter().any(|(v, c, p)| v == name && *c == callee && *p == pos) {
+                    ref_args.push((name.to_string(), callee.clone(), pos));
+                }
+            }
+        }
         let lhs = match n.kind() {
             "binary_expression" if ASSIGN_OPS.contains(&op(&n).as_str()) => named_children(&n).into_iter().find(|c| c.kind() != "comment"),
             "unary_expression" if matches!(op(&n).as_str(), "++" | "--") => named_children(&n).into_iter().find(|c| c.kind() != "comment"),
@@ -527,7 +572,7 @@ fn function_writes(f: &Node, src: &str) -> Vec<(String, bool)> {
         }
         stack.extend(named_children(&n));
     }
-    out
+    (out, ref_args)
 }
 
 /// Comment lines directly above a function definition.
@@ -862,6 +907,20 @@ impl Index {
     }
 
     /// Functions assigning the script variable `name`: (script, function index, member write).
+    /// Whether some script or engine function `callee` has a reference parameter at `pos`.
+    pub fn is_ref_param(&self, callee: &str, pos: usize) -> bool {
+        self.lookup().ref_params.contains(&(callee.to_string(), pos))
+    }
+
+    /// Functions of `file` that pass the script variable `name` to a reference parameter (write sites; `file`'s own
+    /// functions count too: an open document may not be in the index).
+    pub fn ref_writes<'a>(&self, file: &'a FileInfo, name: &str) -> Vec<usize> {
+        let mut out: Vec<usize> = file.ref_args.iter().filter(|(v, _, c, p)| v == name && (self.is_ref_param(c, *p)
+            || file.funcs.iter().any(|f| f.name == *c && f.params.get(*p).and_then(|x| x.0.as_deref()) == Some("&")))).map(|(_, i, _, _)| *i).collect();
+        out.dedup();
+        out
+    }
+
     pub fn writers<'a>(&'a self, name: &str) -> Vec<(&'a FileInfo, usize, bool)> {
         self.lookup().writers.get(name).into_iter().flatten()
             .filter_map(|(k, i, m)| self.files.get(k).map(|f| (f, *i, *m)))

@@ -587,41 +587,42 @@ impl<'a> Infer<'a> {
                 // a variable passed to a reference parameter: a script's &x can hold anything afterwards; engine
                 // functions write a known type (engine_api.json "&int": Inc/Dec replace the value, PathFree2/
                 // SimFlight write only sometimes; Set writes its second argument)
+                // (a script variable gets the written part as one of its assignments: FuncTypes::writes)
                 for (i, a) in args.iter().enumerate() {
-                    if a.kind() != "identifier" || !self.locals.contains(self.text(a)) {
+                    if a.kind() != "identifier" || self.text(a) == "this" {
                         continue;
                     }
                     let engine_ref = ENGINE.functions.get(name).and_then(|f| f.params.as_ref()?.get(i)).map(|p| p.etype.starts_with('&')).unwrap_or(false);
-                    if !engine_ref && !self.index.all_funcs(name).iter().any(|(_, f)| f.params.get(i).and_then(|p| p.0.as_deref()) == Some("&")) {
+                    let is_ref = |f: &FuncDef| f.name == name && f.params.get(i).and_then(|p| p.0.as_deref()) == Some("&");
+                    if !engine_ref && !self.info.funcs.iter().any(is_ref) && !self.index.all_funcs(name).iter().any(|(_, f)| is_ref(f)) {
                         continue;
                     }
                     let reach = if is_arrow_call(&n) { self.index.reachable_funcs(&self.info.path, name) } else { self.index.visible_funcs(self.info, name) };
-                    let written = if !reach.is_empty() {
+                    // (type written, whether the old value can stay)
+                    let written: Option<(Ty, bool)> = if !reach.is_empty() {
                         let refs: Vec<_> = reach.into_iter().filter(|(_, f)| f.params.get(i).and_then(|p| p.0.as_deref()) == Some("&")).collect();
-                        if refs.is_empty() {
-                            None
-                        } else {
-                            // what the function body leaves in it (the caller's value where some path doesn't write)
-                            let old = s.as_ref().and_then(|st| st.get(self.text(a)).copied()).unwrap_or(ANY);
-                            Some(refs.iter().fold(NONE, |t, (file, f)| {
-                                let (w, keep) = self.ref_summary(file, f, i);
-                                t | w | if keep { old } else { NONE }
-                            }))
-                        }
+                        // what the function body leaves in it (the caller's value where some path doesn't write)
+                        (!refs.is_empty()).then(|| refs.iter().fold((NONE, false), |(t, k), (file, f)| {
+                            let (w, keep) = self.ref_summary(file, f, i);
+                            (t | w, k || keep)
+                        }))
                     } else {
                         let et = ENGINE.functions.get(name).and_then(|f| f.params.as_ref()?.get(i)).map(|p| p.etype.as_str()).unwrap_or("");
                         match et.strip_prefix('&') {
-                            Some(_) if name == "Set" => Some(tys.get(1).copied().unwrap_or(ANY)),
-                            Some(t) => {
-                                let t = from_name(t);
-                                let old = s.as_ref().and_then(|st| st.get(self.text(a)).copied()).unwrap_or(ANY);
-                                Some(if matches!(name, "Inc" | "Dec") { t } else { t | old })
-                            }
+                            Some(_) if name == "Set" => Some((tys.get(1).copied().unwrap_or(ANY), false)),
+                            Some(t) => Some((from_name(t), !matches!(name, "Inc" | "Dec"))),
                             None => None,
                         }
                     };
-                    if let (Some(t), Some(st)) = (written, s.as_mut()) {
-                        self.put(st, self.text(a), t);
+                    let Some((w, keep)) = written else { continue };
+                    let var = self.text(a);
+                    if self.locals.contains(var) {
+                        let old = s.as_ref().and_then(|st| st.get(var).copied()).unwrap_or(ANY);
+                        if let Some(st) = s.as_mut() {
+                            self.put(st, var, if keep { w | old } else { w });
+                        }
+                    } else if w != NONE {
+                        *self.out.writes.entry(var.to_string()).or_insert(NONE) |= w;
                     }
                 }
                 // obj->F(): the receiver's definitions when known (objids.rs)
@@ -958,6 +959,12 @@ impl<'a> Infer<'a> {
         }
         for (i, member) in self.info.writes.iter().filter(|(n, _, _)| n == name).map(|(_, i, m)| (*i, *m)) {
             sites.push((self.info, i, member));
+        }
+        // passed to a reference parameter (Index::ref_writes; the lookup has them for the other files)
+        for i in self.index.ref_writes(self.info, name) {
+            if !sites.iter().any(|(f, j, m)| path_key(&f.path) == current && *j == i && !m) {
+                sites.push((self.info, i, false));
+            }
         }
         let mut seen_files = HashSet::new();
         for (f, i, member) in sites {

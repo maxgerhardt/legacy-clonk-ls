@@ -506,9 +506,13 @@ impl<'a, 't> IdCtx<'a, 't> {
         let current = path_key(&self.info.path);
         let mut sites: Vec<(&FileInfo, usize, bool)> = self.index.writers(name).into_iter().filter(|(f, _, _)| path_key(&f.path) != current).collect();
         sites.extend(self.info.writes.iter().filter(|(n, _, _)| n == name).map(|(_, i, m)| (self.info, *i, *m)));
+        // passed to a reference parameter: what the callee writes isn't followed
+        if !self.index.ref_writes(self.info, name).is_empty() {
+            sites.push((self.info, usize::MAX, true));
+        }
         let mut r: Ids = Some(BTreeSet::new());
         for (f, i, member) in sites {
-            if member {
+            if member || self.index.ref_writes(f, name).contains(&i) {
                 r = None; // obj.name = x from somewhere: not followed
                 break;
             }
