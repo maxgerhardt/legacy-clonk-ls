@@ -1,7 +1,7 @@
 //! Code navigation for C4Script: hover, go to definition, references, document/workspace symbols.
 
 use super::engine::ENGINE;
-use super::index::{is_arrow_call, path_key, path_to_uri, FileInfo, FuncDef, Index, VarKind};
+use super::index::{is_arrow_call, is_map_key, path_key, path_to_uri, FileInfo, FuncDef, Index, VarKind};
 use super::text::{node_text, LineIndex};
 use tower_lsp::lsp_types::{
     DocumentSymbol, Location, Position, Range, SymbolInformation, SymbolKind,
@@ -15,6 +15,8 @@ pub enum Target<'t> {
     FuncDef { name: String },
     Id { id: String },
     Ident { name: String, node: Node<'t> },
+    /// key of a map literal or `m.key` access (a name, never a variable)
+    MapKey { name: String, node: Node<'t> },
 }
 
 pub fn target_at<'t>(tree: &'t Tree, src: &str, li: &LineIndex, pos: Position) -> Option<Target<'t>> {
@@ -23,6 +25,7 @@ pub fn target_at<'t>(tree: &'t Tree, src: &str, li: &LineIndex, pos: Position) -
     let text = node_text(&n, src).to_string();
     match n.kind() {
         "id" => Some(Target::Id { id: text }),
+        "identifier" if is_map_key(&n) => Some(Target::MapKey { name: text, node: n }),
         "identifier" => {
             let parent = n.parent()?;
             match parent.kind() {
@@ -153,6 +156,31 @@ standard definition from `{}`", id, std.name, std.tlc));
             }
             Some(s)
         }
+        Target::MapKey { name, node } => {
+            let p = node.parent()?;
+            // the value: {key = value} entry, or the m.key expression itself
+            let (value, what) = if p.kind() == "map_key" {
+                (p.next_named_sibling(), "map key".to_string())
+            } else {
+                let base = p.named_child(0).map(|b| node_text(&b, src).to_string()).unwrap_or_default();
+                (Some(p), format!("key of the map `{}`", base))
+            };
+            let ty = if super::diagnostics::type_checks_enabled() {
+                value.and_then(|v| super::types::type_at(index, info, src, &tree.root_node(), &v))
+                    .filter(|t| *t != super::types::ANY)
+                    .map(|t| format!(": {}", super::types::display(t)))
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+            let keys = map_keys(&enclosing_function(&node).unwrap_or(tree.root_node()), &name, src, &li);
+            let lines: Vec<String> = keys.iter().map(|r| (r.start.line + 1).to_string()).collect();
+            let at = if lines.is_empty() { String::new() } else { format!(", in map literals on line {}", lines.join(", ")) };
+            Some(format!("```c4script
+{}{}
+```
+{}{}", name, ty, what, at))
+        }
         Target::Ident { name, node } => {
             if let Some(c) = ENGINE.constants.get(&name) {
                 return Some(format!("```c4script\nconst {} {}\n```\n*engine constant*", c.ty, name));
@@ -212,6 +240,10 @@ pub fn definition(index: &Index, info: &FileInfo, tree: &Tree, src: &str, pos: P
             }
             out
         }
+        Target::MapKey { name, node } => {
+            map_keys(&enclosing_function(&node).unwrap_or(tree.root_node()), &name, src, &li)
+                .into_iter().filter_map(|r| loc(&info.path, r)).collect()
+        }
         Target::Ident { name, node } => {
             if let Some(func) = enclosing_function(&node) {
                 if let Some(r) = local_declaration(&func, &name, src, &li) {
@@ -255,13 +287,23 @@ pub fn references(index: &Index, info: &FileInfo, tree: &Tree, src: &str, pos: P
                 }
             }
         }
+        Target::MapKey { name, node } => {
+            // the same key in literals and m.key accesses of the function
+            let mut stack = vec![enclosing_function(&node).unwrap_or(tree.root_node())];
+            while let Some(n) = stack.pop() {
+                if n.kind() == "identifier" && is_map_key(&n) && node_text(&n, src) == name {
+                    out.extend(loc(&info.path, li.node_range(&n)));
+                }
+                stack.extend(super::index::named_children(&n));
+            }
+        }
         Target::Ident { name, node } => {
             // local variable: references within the function
             if let Some(func) = enclosing_function(&node) {
                 if local_declaration(&func, &name, src, &li).is_some() {
                     let mut stack = vec![func];
                     while let Some(n) = stack.pop() {
-                        if n.kind() == "identifier" && node_text(&n, src) == name {
+                        if n.kind() == "identifier" && !is_map_key(&n) && node_text(&n, src) == name {
                             out.extend(loc(&info.path, li.node_range(&n)));
                         }
                         stack.extend(super::index::named_children(&n));
@@ -271,6 +313,22 @@ pub fn references(index: &Index, info: &FileInfo, tree: &Tree, src: &str, pos: P
             }
         }
     }
+    out
+}
+
+/// Ranges of the keys `name` in the map literals below `scope`.
+fn map_keys(scope: &Node, name: &str, src: &str, li: &LineIndex) -> Vec<Range> {
+    let mut out = vec![];
+    let mut stack = vec![*scope];
+    while let Some(n) = stack.pop() {
+        if n.kind() == "map_key" {
+            if let Some(k) = n.named_child(0).filter(|k| node_text(k, src) == name) {
+                out.push(li.node_range(&k));
+            }
+        }
+        stack.extend(super::index::named_children(&n));
+    }
+    out.sort_by_key(|r| (r.start.line, r.start.character));
     out
 }
 

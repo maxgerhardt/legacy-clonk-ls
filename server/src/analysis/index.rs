@@ -310,6 +310,15 @@ pub fn named_children<'t>(n: &Node<'t>) -> Vec<Node<'t>> {
 }
 
 /// Is this method_call the right-hand side of `obj->Call()`?
+/// A map key, not a variable: `speed` in `{speed = 5}` or in `m.speed` (but not `m[speed]`, an expression).
+pub fn is_map_key(node: &Node) -> bool {
+    match node.parent() {
+        Some(p) if p.kind() == "map_key" => true,
+        Some(p) if p.kind() == "map_access" => node.prev_sibling().map(|s| s.kind() == ".").unwrap_or(false),
+        _ => false,
+    }
+}
+
 pub fn is_arrow_call(call: &Node) -> bool {
     match call.parent() {
         Some(p) if p.kind() == "arrow_expression" => named_children(&p).first().map(|f| f.id() != call.id()).unwrap_or(false),

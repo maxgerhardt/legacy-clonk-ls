@@ -467,14 +467,7 @@ fn function_names(func: &Node, src: &str) -> (HashSet<String>, HashSet<String>) 
 
 /// the key of a map entry ({speed = 5}) or of a map access with '.' (m.speed)
 fn is_map_key(node: &Node) -> bool {
-    match node.parent() {
-        Some(p) if p.kind() == "map_key" => true,
-        Some(p) if p.kind() == "map_access" => {
-            // m.speed: the identifier right after the '.' (not m[speed], where speed is an expression)
-            node.prev_sibling().map(|s| s.kind() == ".").unwrap_or(false)
-        }
-        _ => false,
-    }
+    crate::analysis::index::is_map_key(node)
 }
 
 /// an engine function (not overridden by a function of this script): semantic modifier defaultLibrary
