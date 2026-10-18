@@ -163,7 +163,8 @@ fn own_object_string(s: &Node, src: &str) -> bool {
 /// Engine functions that run a string as script or call a function by its name.
 const BY_NAME: &[&str] = &["Schedule", "ScheduleCall", "AddTimer", "Call", "PrivateCall", "ProtectedCall", "ObjectCall",
     "GameCall", "GameCallEx", "DefinitionCall", "eval", "AddMenuItem", "CreateMenu", "SetCommand", "AddCommand",
-    "AppendCommand", "AddEffect", "EffectCall", "CheckEffect", "GetEffect", "RemoveEffect", "ChangeEffect"];
+    "AppendCommand", "AddEffect", "EffectCall", "CheckEffect", "GetEffect", "RemoveEffect", "ChangeEffect",
+    "AddMsgBoardCmd", "LocateFunc", "ResortObject", "ResortObjects", "CallMessageBoard", "PlayerObjectCommand"];
 
 /// Whether a string can name a function that gets called: false when it goes straight (maybe through Format) into
 /// an engine function that doesn't call by name (SetAction, Sound, Log, Message, ...) or into a comparison;
