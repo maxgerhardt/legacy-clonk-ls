@@ -46,7 +46,7 @@ fn loc(path: &std::path::Path, range: Range) -> Option<Location> {
     Some(Location::new(path_to_uri(path)?, range))
 }
 
-fn func_markdown(file: &FileInfo, f: &FuncDef, index: &Index) -> String {
+pub fn func_markdown(file: &FileInfo, f: &FuncDef, index: &Index) -> String {
     let mut s = format!("```c4script\n{}\n```", f.signature());
     let owner = match &file.def_id {
         Some(id) => match index.id_any(id).and_then(|i| i.name.clone()) {

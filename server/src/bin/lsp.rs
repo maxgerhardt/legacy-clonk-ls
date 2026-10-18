@@ -349,6 +349,13 @@ impl LanguageServer for Backend {
             }
         }
 
+        let snippets = params.capabilities.text_document.as_ref()
+            .and_then(|t| t.completion.as_ref())
+            .and_then(|c| c.completion_item.as_ref())
+            .and_then(|i| i.snippet_support)
+            .unwrap_or(false);
+        legacy_clonk_ls::analysis::complete::SNIPPETS.store(snippets, std::sync::atomic::Ordering::Relaxed);
+
         if let Some(lang_tag) = params.locale {
             Translation::configure(lang_tag);
         }
@@ -420,6 +427,11 @@ impl LanguageServer for Backend {
                 document_symbol_provider: Some(OneOf::Left(true)),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
                 signature_help_provider: Some(SignatureHelpOptions {
+                    trigger_characters: Some(vec!["(".to_string(), ",".to_string()]),
+                    ..Default::default()
+                }),
+                completion_provider: Some(CompletionOptions {
+                    trigger_characters: Some([">", ".", "#", "$", "~"].iter().map(|s| s.to_string()).collect()),
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -539,6 +551,15 @@ impl LanguageServer for Backend {
         let uri = params.text_document_position.text_document.uri;
         match self.documents.get(&uri) {
             Some(doc) => {
+                if matches!(doc.doc_type, DocType::Script) {
+                    drop(doc);
+                    let pos = params.text_document_position.position;
+                    let trigger = params.context.as_ref().and_then(|c| c.trigger_character.clone());
+                    let items = self.with_script(&uri, |idx, info, doc| {
+                        legacy_clonk_ls::analysis::complete::complete(idx, info, &doc.source, pos, trigger.as_deref())
+                    });
+                    return Ok(items.flatten().map(CompletionResponse::Array));
+                }
                 let handler = doc.doc_type.get_handler();
                 let cursor_pos = params.text_document_position.position;
                 let items = handler.get_completions(&doc.tree, &doc.source, cursor_pos);
@@ -547,6 +568,14 @@ impl LanguageServer for Backend {
             }
             None => Ok(None),
         }
+    }
+
+    async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let pos = params.text_document_position_params.position;
+        Ok(self
+            .with_script(&uri, |idx, info, doc| legacy_clonk_ls::analysis::complete::signature_help(idx, info, &doc.source, pos))
+            .flatten())
     }
 
     /// Format Document: c4format with the rules of the nearest .c4format (one edit replacing the whole text).
