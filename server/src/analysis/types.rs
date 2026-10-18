@@ -167,9 +167,19 @@ const CALL_FACT: &str = "\u{1}c:";
 pub const NIL_SOURCES: &[&str] = &["FindObject", "FindObject2", "FindObjectOwner", "FindContents", "FindBase", "FindOtherContents",
     "Contained", "Contents", "ScrollContents", "GetCursor", "GetViewCursor", "GetCaptain", "GetCrew", "GetHiRank", "GetActionTarget"];
 
-/// Calls that change containment, actions or objects: they end every call fact.
-const FACT_BREAKERS: &[&str] = &["Exit", "Enter", "SetAction", "SetActionTargets", "ObjectSetAction", "RemoveObject", "Collect",
-    "SetCommand", "AddCommand", "AppendCommand", "ChangeDef", "Split2Components"];
+/// The call facts (by called function) a call can end: actions change GetActionTarget(), containment changes
+/// Contained()/Contents(), removing/changing objects anything. None: no effect.
+fn fact_breaks(name: &str) -> Option<&'static [&'static str]> {
+    const ACTION: &[&str] = &["GetActionTarget"];
+    const CONTAINMENT: &[&str] = &["Contained", "Contents", "FindContents", "ScrollContents", "FindOtherContents"];
+    const ALL: &[&str] = &[];
+    match name {
+        "SetAction" | "SetActionTargets" | "ObjectSetAction" | "SetCommand" | "AddCommand" | "AppendCommand" => Some(ACTION),
+        "Exit" | "Enter" | "Collect" => Some(CONTAINMENT),
+        "RemoveObject" | "ChangeDef" | "Split2Components" => Some(ALL),
+        _ => None,
+    }
+}
 
 /// Result for one function: the type of every evaluated expression and variable use (by node id), the type
 /// each variable has at its declaration/assignment, and the function's return type.
@@ -617,6 +627,29 @@ impl<'a> Infer<'a> {
         Some(format!("{}{}({})", CALL_FACT, name, args.join(",")))
     }
 
+    /// `i < GetCrewCount(p)` -> the call fact of GetCrew(p,i); `i < ContentsCount()` / `ContentsCount(0, obj)` ->
+    /// Contents(i) / Contents(i,obj) (only without an ID filter: ContentsCount(id) counts other things).
+    fn count_fact(&self, idx: &Node, count: &Node) -> Option<String> {
+        if idx.kind() != "identifier" || count.kind() != "method_call" || is_arrow_call(count) {
+            return None;
+        }
+        let i = self.text(idx);
+        let name = self.text(&count.child_by_field_name("name")?);
+        let args: Vec<String> = count.child_by_field_name("args").map(|a| named_children(&a)).unwrap_or_default()
+            .into_iter().filter(|c| c.kind() != "comment").map(|c| self.text(&c).split_whitespace().collect::<String>()).collect();
+        if !args.iter().all(|a| a.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')) {
+            return None;
+        }
+        match name {
+            "GetCrewCount" if args.len() == 1 => Some(call_fact(&format!("GetCrew({},{})", args[0], i))),
+            "ContentsCount" if args.is_empty() || matches!(args[0].as_str(), "0" | "nil") => match args.get(1) {
+                Some(obj) => Some(call_fact(&format!("Contents({},{})", i, obj))),
+                None => Some(call_fact(&format!("Contents({})", i))),
+            },
+            _ => None,
+        }
+    }
+
     fn narrow_into(&self, cond: &Node, st: &mut State, truth: bool) {
         let nc: Vec<Node> = named_children(cond).into_iter().filter(|c| c.kind() != "comment").collect();
         let op = children(cond).iter().find(|c| !c.is_named() && !matches!(c.kind(), "(" | ")")).map(|c| c.kind().to_string()).unwrap_or_default();
@@ -637,6 +670,15 @@ impl<'a> Infer<'a> {
         match (cond.kind(), op.as_str()) {
             ("identifier", _) if truth => not_nil(cond, st),
             ("method_call", _) if truth => fact(cond, st),
+            // for (i = 0; i < GetCrewCount(p); i++) GetCrew(p, i): within the count the item exists
+            ("binary_expression", "<" | ">") if truth => {
+                if let (Some(a), Some(b)) = (nc.first(), nc.get(1)) {
+                    let (idx, count) = if op == "<" { (a, b) } else { (b, a) };
+                    if let Some(k) = self.count_fact(idx, count) {
+                        st.insert(k, !NIL);
+                    }
+                }
+            }
             ("unary_expression", "!") => {
                 if let Some(x) = nc.first() {
                     self.narrow_into(x, st, !truth);
@@ -764,10 +806,20 @@ impl<'a> Infer<'a> {
                         self.out.site_facts.insert(n.id(), facts);
                     }
                 }
-                if FACT_BREAKERS.contains(&name) {
-                    if let Some(st) = s.as_mut() {
-                        st.retain(|k, _| !k.starts_with(CALL_FACT));
-                    }
+                // Exit(obj)/Enter(target, obj) on another object leave this one's containment alone
+                let other = |i: usize| args.get(i).map(|a| !matches!(self.text(a), "this" | "this()" | "nil" | "0")).unwrap_or(false);
+                let moves_other = match name {
+                    "Exit" => other(0),
+                    "Enter" => other(1),
+                    _ => false,
+                };
+                if let (Some(funcs), false, Some(st)) = (fact_breaks(name), moves_other, s.as_mut()) {
+                    // an empty list ends every call fact
+                    st.retain(|k, _| {
+                        let Some(f) = k.strip_prefix(CALL_FACT) else { return true };
+                        let called = f.split('(').next().unwrap_or("");
+                        !funcs.is_empty() && !funcs.contains(&called)
+                    });
                 }
                 // a variable passed to a reference parameter: a script's &x can hold anything afterwards; engine
                 // functions write a known type (engine_api.json "&int": Inc/Dec replace the value, PathFree2/
