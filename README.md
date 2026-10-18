@@ -21,6 +21,11 @@ The language server uses tree-sitter to parse the source code.
 - **Go to definition**, **references**, **document symbols** and **workspace symbols** across all
   scripts below the workspace root(s) (`initializationOptions.extraRoots` / env `C4LS_EXTRA_ROOTS` add more).
 - `c4check`: the same diagnostics on the command line (`c4check --root <dir> [paths]`), e.g. for CI.
+- Type inference (`types.rs`), object definitions (`objids.rs`), engine/caller guarantees (`callers.rs`), lint
+  and `NOLINT` comments (`lint.rs`), autocomplete (`complete.rs`), DefCore/Scenario/ActMap completion (`ini.rs`),
+  formatter (`format.rs`). The user-facing summary with all settings is in `client/README.md`.
+  `c4check` switches: `--no-type-checks`, `--no-field-types`, `--no-object-ids`, `--no-lint`, `--nil-checks`,
+  `--create-may-fail`, `--caller-inference`, `--errors-only`.
 
 Engine data (`server/src/core/engine_api.json`, `system_scripts.json`) is generated from the
 LegacyClonk source and lcdocs (English via `lcdocs/en.po`):
