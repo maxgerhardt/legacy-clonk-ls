@@ -6,7 +6,11 @@
 //! `FindObject(ID, ...)` / `FindContents(ID)` -> {ID}; `FindObject2`/`FindObjects`/`FindObject` criteria with
 //! `Find_ID(ID)` (Find_Or -> union, Find_And / several criteria -> intersection); `this` -> the script's definition;
 //! an ID value (definition calls); another variable; `a ?? b`, `a || b`, `[a, b]`, `a[i]` (an array's elements);
-//! nil/numbers/strings add nothing. Anything else (parameters, other calls, obj.local, `Contents()`) is unknown.
+//! nil/numbers/strings add nothing; a script function call (also `obj->F()` on a known object): the union over its
+//! `return` values. Anything else (parameters, obj.local, `Contents()`) is unknown.
+//! Narrowing: a use inside `if (GetID(x) == ID)` / `x->GetID() == ID` (also `||`, `&&`, `!`, the else branch of `!=`,
+//! `while`, the right side of `&&`/`||` from #strict 2 on) or after `if (GetID(x) != ID) return;` is of ID, unless
+//! x is assigned in between (a loop around the use counts as a whole).
 //! A union can only be larger than the truth, so the result is safe for narrowing `->` calls; unknown keeps the
 //! old behaviour (any script defining the name). Switch: diagnostics::object_ids_enabled().
 
@@ -24,10 +28,16 @@ lazy_static::lazy_static! {
     /// "local|<decl script>|name" / "static|name" -> IDs (cleared with types::clear_cache)
     static ref FIELD_IDS: Mutex<HashMap<String, Ids>> = Mutex::new(HashMap::new());
     static ref FIELD_IN_PROGRESS: Mutex<HashSet<String>> = Mutex::new(HashSet::new());
+    /// "<script>|func|line" -> IDs of the function's return values
+    static ref RETURN_IDS: Mutex<HashMap<String, Ids>> = Mutex::new(HashMap::new());
+    static ref RETURN_IN_PROGRESS: Mutex<HashSet<String>> = Mutex::new(HashSet::new());
 }
 
 pub fn clear_cache() {
     if let Ok(mut m) = FIELD_IDS.lock() {
+        m.clear();
+    }
+    if let Ok(mut m) = RETURN_IDS.lock() {
         m.clear();
     }
 }
@@ -112,6 +122,9 @@ impl<'a, 't> IdCtx<'a, 't> {
             }
             "identifier" => {
                 let name = self.text(n);
+                if let Some(r) = self.narrow(n, name) {
+                    return Some(r);
+                }
                 if name == "this" {
                     return self.this_ids();
                 }
@@ -181,7 +194,7 @@ impl<'a, 't> IdCtx<'a, 't> {
         let args: Vec<Node> = n.child_by_field_name("args").map(|a| named_children(&a)).unwrap_or_default()
             .into_iter().filter(|c| c.kind() != "comment").collect();
         if super::index::is_arrow_call(n) {
-            return None;
+            return self.arrow_call(n, name);
         }
         if CREATORS.contains(&name) {
             if let Some(first) = args.first().filter(|f| f.kind() == "id") {
@@ -191,6 +204,12 @@ impl<'a, 't> IdCtx<'a, 't> {
         if SEARCHES.contains(&name) {
             return self.criteria(&args);
         }
+        if matches!(name, "Par" | "inherited" | "_inherited") {
+            return None;
+        }
+        if let Some(r) = self.script_call(name) {
+            return r;
+        }
         // other engine functions: not an object unless they return one
         if let Some(t) = super::types::engine_return(name) {
             if t & (super::types::OBJECT | super::types::ARRAY) == 0 {
@@ -198,6 +217,215 @@ impl<'a, 't> IdCtx<'a, 't> {
             }
         }
         None
+    }
+
+    fn in_global(&self) -> bool {
+        self.func.and_then(|f| f.child_by_field_name("visibility")).map(|v| self.text(&v) == "global").unwrap_or(false)
+    }
+
+    /// A direct call of a script function: the union over the return values of every function it can reach (the
+    /// object may be one that #includes this script and overloads the name). None: no script function of that name.
+    fn script_call(&self, name: &str) -> Option<Ids> {
+        let mut funcs = if self.in_global() { self.index.global_funcs(&self.info.path, name) } else { self.index.visible_funcs(self.info, name) };
+        if funcs.is_empty() {
+            return None;
+        }
+        if !self.in_global() {
+            if let Some(ids) = self.this_ids() {
+                let ids: Vec<String> = ids.into_iter().collect();
+                for g in member_funcs(self.index, self.info, &ids, name) {
+                    if !funcs.iter().any(|(f, d)| path_key(&f.path) == path_key(&g.0.path) && d.name_range == g.1.name_range) {
+                        funcs.push(g);
+                    }
+                }
+            }
+        }
+        if funcs.len() > 8 {
+            return Some(None);
+        }
+        Some(funcs.iter().fold(Some(BTreeSet::new()), |acc, (f, d)| union(acc, self.returns(f, d))))
+    }
+
+    /// `obj->F()` on an object whose definitions are known and indexed: the return values of the function that runs.
+    fn arrow_call(&self, n: &Node<'t>, name: &str) -> Ids {
+        let target = named_children(&n.parent()?).into_iter().find(|c| c.kind() != "comment")?;
+        let ids = resolvable(self.index, self.info, self.expr(&target)?)?;
+        let funcs = member_funcs(self.index, self.info, &ids, name);
+        if funcs.is_empty() {
+            let t = super::types::engine_return(name)?;
+            return (t & (super::types::OBJECT | super::types::ARRAY) == 0).then(BTreeSet::new);
+        }
+        funcs.iter().fold(Some(BTreeSet::new()), |acc, (f, d)| union(acc, self.returns(f, d)))
+    }
+
+    /// IDs of a script function's return values (cached; recursion and deep chains give unknown).
+    fn returns(&self, file: &FileInfo, f: &FuncDef) -> Ids {
+        if self.depth >= 4 {
+            return None;
+        }
+        let key = format!("{}|{}|{}", path_key(&file.path), f.name, f.name_range.start.line);
+        if let Some(r) = RETURN_IDS.lock().ok().and_then(|m| m.get(&key).cloned()) {
+            return r;
+        }
+        if !RETURN_IN_PROGRESS.lock().map(|mut p| p.insert(super::types::busy_key(&key))).unwrap_or(false) {
+            return None;
+        }
+        let r = (|| {
+            let current_key = path_key(&self.info.path);
+            let entry = super::types::parsed_script(&file.path, Some((&current_key, self.src)))?;
+            let (src, tree) = (&entry.0, &entry.1);
+            let root = tree.root_node();
+            let func = super::types::find_func(&root, src, f)?;
+            let ctx = IdCtx::at_depth(self.index, file, src, Some(func), self.depth + 1);
+            let mut acc = Some(BTreeSet::new());
+            let mut stack = vec![func];
+            while let Some(n) = stack.pop() {
+                if n.kind() == "return_statement" {
+                    if let Some(v) = named_children(&n).into_iter().find(|c| c.kind() != "comment") {
+                        acc = union(acc, ctx.expr(&v));
+                    }
+                    if acc.is_none() {
+                        break;
+                    }
+                }
+                stack.extend(named_children(&n));
+            }
+            acc
+        })();
+        if let Ok(mut p) = RETURN_IN_PROGRESS.lock() {
+            p.remove(&super::types::busy_key(&key));
+        }
+        if let Ok(mut m) = RETURN_IDS.lock() {
+            m.insert(key, r.clone());
+        }
+        r
+    }
+
+    /// The definition `name` (a variable or `this`) must be of at the use `n`, from GetID tests guarding it.
+    fn narrow(&self, n: &Node<'t>, name: &str) -> Option<BTreeSet<String>> {
+        let func = self.func?;
+        let mut c = *n;
+        while let Some(p) = c.parent() {
+            if p.id() == func.id() {
+                break;
+            }
+            let named: Vec<Node> = named_children(&p).into_iter().filter(|x| x.kind() != "comment").collect();
+            match p.kind() {
+                "if_statement" if named.first().map(|f| f.id() != c.id()).unwrap_or(false) => {
+                    let cond = named[0];
+                    let alt = super::index::children(&p).iter().find(|x| x.kind() == "else").map(|e| c.start_byte() > e.start_byte()).unwrap_or(false);
+                    if let Some(r) = self.cond_ids(&cond, name, !alt).filter(|_| !self.reassigned(name, cond.end_byte(), n)) {
+                        return Some(r);
+                    }
+                }
+                "while_statement" if named.first().map(|f| f.id() != c.id()).unwrap_or(false) => {
+                    if let Some(r) = self.cond_ids(&named[0], name, true).filter(|_| !self.reassigned(name, named[0].end_byte(), &p)) {
+                        return Some(r);
+                    }
+                }
+                "binary_expression" if named.len() == 2 && named[1].id() == c.id() => {
+                    let op = super::index::children(&p).iter().find(|x| !x.is_named() && !matches!(x.kind(), "(" | ")")).map(|x| x.kind().to_string()).unwrap_or_default();
+                    if matches!(op.as_str(), "&&" | "||") && self.strict() >= 2 {
+                        if let Some(r) = self.cond_ids(&named[0], name, op == "&&").filter(|_| !self.reassigned(name, named[0].end_byte(), n)) {
+                            return Some(r);
+                        }
+                    }
+                }
+                "block" => {
+                    // if (GetID(x) != ID) return; ... x
+                    for s in named.iter().rev().filter(|s| s.end_byte() <= c.start_byte()) {
+                        if s.kind() != "if_statement" || super::index::children(s).iter().any(|x| x.kind() == "else") {
+                            continue;
+                        }
+                        let parts: Vec<Node> = named_children(s).into_iter().filter(|x| x.kind() != "comment").collect();
+                        if let (Some(cond), Some(body)) = (parts.first(), parts.get(1)) {
+                            if exits(body) {
+                                if let Some(r) = self.cond_ids(cond, name, false).filter(|_| !self.reassigned(name, s.end_byte(), n)) {
+                                    return Some(r);
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+            c = p;
+        }
+        None
+    }
+
+    fn strict(&self) -> u8 {
+        let mut root = match self.func { Some(f) => f, None => return 0 };
+        while let Some(p) = root.parent() {
+            root = p;
+        }
+        super::diagnostics::strict_level(&root, self.src)
+    }
+
+    /// What `cond` being `truth` says about the definition of `name`.
+    fn cond_ids(&self, cond: &Node<'t>, name: &str, truth: bool) -> Option<BTreeSet<String>> {
+        let nc: Vec<Node> = named_children(cond).into_iter().filter(|c| c.kind() != "comment").collect();
+        let op = super::index::children(cond).iter().find(|c| !c.is_named() && !matches!(c.kind(), "(" | ")")).map(|c| c.kind().to_string()).unwrap_or_default();
+        match (cond.kind(), op.as_str()) {
+            ("unary_expression", "!") => self.cond_ids(nc.first()?, name, !truth),
+            ("binary_expression", "==" | "!=") if (op == "==") == truth => {
+                let (l, r) = (nc.first()?, nc.get(1)?);
+                let id = |x: &Node| (x.kind() == "id" && !self.text(x).chars().all(|ch| ch.is_ascii_digit())).then(|| self.text(x).to_string());
+                let (g, i) = if self.is_get_id(l, name) { (l, id(r)?) } else { (r, id(l)?) };
+                self.is_get_id(g, name).then(|| std::iter::once(i).collect())
+            }
+            // both hold: either one narrows (both: the intersection)
+            ("binary_expression", "&&" | "||") if (op == "&&") == truth => {
+                let (a, b) = (self.cond_ids(nc.first()?, name, truth), self.cond_ids(nc.get(1)?, name, truth));
+                match (a, b) {
+                    (Some(a), Some(b)) => Some(a.intersection(&b).cloned().collect()),
+                    (a, b) => a.or(b),
+                }
+            }
+            // one of them holds: both must narrow
+            ("binary_expression", "&&" | "||") => {
+                let mut a = self.cond_ids(nc.first()?, name, truth)?;
+                a.extend(self.cond_ids(nc.get(1)?, name, truth)?);
+                Some(a)
+            }
+            _ => None,
+        }
+    }
+
+    /// `GetID(name)`, `name->GetID()`, for `this` also `GetID()`.
+    fn is_get_id(&self, n: &Node<'t>, name: &str) -> bool {
+        let is_name = |x: &Node| x.kind() == "identifier" && self.text(x) == name;
+        let get_id = |x: &Node| x.kind() == "method_call" && x.child_by_field_name("name").map(|y| self.text(&y) == "GetID").unwrap_or(false);
+        let args = |x: &Node<'t>| -> Vec<Node<'t>> {
+            x.child_by_field_name("args").map(|a| named_children(&a)).unwrap_or_default().into_iter().filter(|c| c.kind() != "comment").collect()
+        };
+        match n.kind() {
+            "method_call" if get_id(n) && !super::index::is_arrow_call(n) => match args(n).as_slice() {
+                [] => name == "this",
+                [a] => is_name(a),
+                _ => false,
+            },
+            "arrow_expression" => {
+                let nc: Vec<Node> = named_children(n).into_iter().filter(|c| c.kind() != "comment").collect();
+                nc.len() == 2 && is_name(&nc[0]) && get_id(&nc[1]) && args(&nc[1]).is_empty()
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether `name` is assigned between byte `from` and the use `n` (a loop around `n` that starts after `from`
+    /// counts as a whole: its later assignments reach `n` through the next iteration).
+    fn reassigned(&self, name: &str, from: usize, n: &Node) -> bool {
+        let Some(func) = self.func else { return true };
+        let mut to = n.start_byte();
+        let mut cur = n.parent();
+        while let Some(p) = cur {
+            if matches!(p.kind(), "while_statement" | "for_statement") && p.start_byte() >= from {
+                to = to.max(p.end_byte());
+            }
+            cur = p.parent();
+        }
+        assigned_values(&func, name, self.src, false).iter().any(|v| v.start_byte() >= from && v.start_byte() < to)
     }
 
     /// All criteria hold (several arguments, Find_And): the intersection of the restricting ones.
@@ -266,7 +494,7 @@ impl<'a, 't> IdCtx<'a, 't> {
         if let Some(r) = FIELD_IDS.lock().ok().and_then(|m| m.get(&key).cloned()) {
             return r;
         }
-        if !FIELD_IN_PROGRESS.lock().map(|mut p| p.insert(key.clone())).unwrap_or(false) {
+        if !FIELD_IN_PROGRESS.lock().map(|mut p| p.insert(super::types::busy_key(&key))).unwrap_or(false) {
             return Some(BTreeSet::new());
         }
         let decl_fresh: &FileInfo = if path_key(&decl.path) == path_key(&self.info.path) { self.info } else { decl };
@@ -297,7 +525,7 @@ impl<'a, 't> IdCtx<'a, 't> {
             }
         }
         if let Ok(mut p) = FIELD_IN_PROGRESS.lock() {
-            p.remove(&key);
+            p.remove(&super::types::busy_key(&key));
         }
         if let Ok(mut m) = FIELD_IDS.lock() {
             m.insert(key, r.clone());
@@ -366,6 +594,18 @@ fn assigned_values<'t>(func: &Node<'t>, name: &str, src: &str, script_var: bool)
         return vec![];
     }
     out
+}
+
+/// Whether a statement always leaves the code after it (return/break/continue, a block ending in one, an
+/// if/else whose branches both leave).
+fn exits(s: &Node) -> bool {
+    let named: Vec<Node> = named_children(s).into_iter().filter(|c| c.kind() != "comment").collect();
+    match s.kind() {
+        "return_statement" | "flow_control_statement" => true,
+        "block" => named.last().map(exits).unwrap_or(false),
+        "if_statement" => super::index::children(s).iter().any(|c| c.kind() == "else") && named.len() == 3 && exits(&named[1]) && exits(&named[2]),
+        _ => false,
+    }
 }
 
 /// IDs of the receiver of the `->` call `call` (a method_call node), if they are known and every one of them has an

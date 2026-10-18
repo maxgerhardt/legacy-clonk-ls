@@ -5,7 +5,7 @@
     {
      "key": "id",
      "kind": "id",
-     "default": "C4ID_None"
+     "default": ""
     },
     {
      "key": "Version",
@@ -14,12 +14,12 @@
     {
      "key": "Name",
      "kind": "string",
-     "default": "\"Undefined\""
+     "default": "Undefined"
     },
     {
      "key": "RequireDef",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "Category",
@@ -67,7 +67,7 @@
     {
      "key": "TimerCall",
      "kind": "function",
-     "default": "\"\""
+     "default": ""
     },
     {
      "key": "ContactCalls",
@@ -87,22 +87,22 @@
     {
      "key": "Components",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "SolidMask",
      "kind": "ints",
-     "default": "TargetRect0"
+     "default": "0,0,0,0,0,0"
     },
     {
      "key": "TopFace",
      "kind": "ints",
-     "default": "TargetRect0"
+     "default": "0,0,0,0,0,0"
     },
     {
      "key": "Picture",
-     "kind": "int",
-     "default": "Rect0"
+     "kind": "ints",
+     "default": "0,0,0,0"
     },
     {
      "key": "PictureFE",
@@ -110,13 +110,13 @@
     },
     {
      "key": "Entrance",
-     "kind": "int",
-     "default": "Rect0"
+     "kind": "ints",
+     "default": "0,0,0,0"
     },
     {
      "key": "Collection",
-     "kind": "int",
-     "default": "Rect0"
+     "kind": "ints",
+     "default": "0,0,0,0"
     },
     {
      "key": "CollectionLimit",
@@ -146,7 +146,7 @@
     {
      "key": "BurnTo",
      "kind": "id",
-     "default": "C4ID_None"
+     "default": ""
     },
     {
      "key": "Base",
@@ -281,7 +281,7 @@
     {
      "key": "ColorByMaterial",
      "kind": "string",
-     "default": "\"\""
+     "default": ""
     },
     {
      "key": "HorizontalFix",
@@ -411,7 +411,7 @@
     {
      "key": "BlitMode",
      "kind": "int",
-     "default": "C4D_Blit_Normal"
+     "default": "0"
     },
     {
      "key": "NoBreath",
@@ -502,7 +502,7 @@
     {
      "key": "BaseAutoSell",
      "kind": "int",
-     "default": "id == C4ID_Gold"
+     "default": "0 (1 for GOLD)"
     },
     {
      "key": "Width",
@@ -542,7 +542,7 @@
     {
      "key": "ContactDensity",
      "kind": "int",
-     "default": "C4M_Solid"
+     "default": "50"
     },
     {
      "key": "FireTop",
@@ -678,12 +678,12 @@
     {
      "key": "Name",
      "kind": "string",
-     "default": "\"\""
+     "default": ""
     },
     {
      "key": "Procedure",
      "kind": "procedure",
-     "default": "\"\"",
+     "default": "",
      "values": [
       "WALK",
       "FLIGHT",
@@ -744,7 +744,7 @@
     {
      "key": "Facet",
      "kind": "ints",
-     "default": "TargetRect0"
+     "default": "0,0,0,0,0,0"
     },
     {
      "key": "FacetBase",
@@ -764,7 +764,7 @@
     {
      "key": "NextAction",
      "kind": "action",
-     "default": "\"\""
+     "default": ""
     },
     {
      "key": "NoOtherAction",
@@ -774,27 +774,27 @@
     {
      "key": "StartCall",
      "kind": "function",
-     "default": "\"\""
+     "default": ""
     },
     {
      "key": "EndCall",
      "kind": "function",
-     "default": "\"\""
+     "default": ""
     },
     {
      "key": "AbortCall",
      "kind": "function",
-     "default": "\"\""
+     "default": ""
     },
     {
      "key": "PhaseCall",
      "kind": "function",
-     "default": "\"\""
+     "default": ""
     },
     {
      "key": "Sound",
      "kind": "string",
-     "default": "\"\""
+     "default": ""
     },
     {
      "key": "ObjectDisabled",
@@ -814,12 +814,12 @@
     {
      "key": "InLiquidAction",
      "kind": "action",
-     "default": "\"\""
+     "default": ""
     },
     {
      "key": "TurnAction",
      "kind": "action",
-     "default": "\"\""
+     "default": ""
     },
     {
      "key": "Reverse",
@@ -843,17 +843,17 @@
     {
      "key": "Title",
      "kind": "string",
-     "default": "\"Default Title\""
+     "default": "Default Title"
     },
     {
      "key": "Loader",
      "kind": "string",
-     "default": "\"\""
+     "default": ""
     },
     {
      "key": "Font",
      "kind": "string",
-     "default": "\"\""
+     "default": ""
     },
     {
      "key": "Version",
@@ -872,12 +872,12 @@
     {
      "key": "MaxPlayer",
      "kind": "int",
-     "default": "C4S_MaxPlayerDefault"
+     "default": "12"
     },
     {
      "key": "MaxPlayerLeague",
      "kind": "int",
-     "default": "MaxPlayer"
+     "default": "the value of MaxPlayer"
     },
     {
      "key": "MinPlayer",
@@ -917,32 +917,32 @@
     {
      "key": "ForcedAutoContextMenu",
      "kind": "int",
-     "default": "fSection ? MainForcedAutoContextMenu : -1"
+     "default": "-1"
     },
     {
      "key": "ForcedAutoStopControl",
      "kind": "int",
-     "default": "fSection ? MainForcedControlStyle : -1"
+     "default": "-1"
     },
     {
      "key": "Engine",
      "kind": "string",
-     "default": "\"\""
+     "default": ""
     },
     {
      "key": "MissionAccess",
      "kind": "string",
-     "default": "\"\""
+     "default": ""
     },
     {
      "key": "NetworkGame",
      "kind": "bool",
-     "default": "false"
+     "default": "0"
     },
     {
      "key": "NetworkRuntimeJoin",
      "kind": "bool",
-     "default": "false"
+     "default": "0"
     },
     {
      "key": "ForcedGfxMode",
@@ -962,29 +962,29 @@
     {
      "key": "Origin",
      "kind": "string",
-     "default": "StdStrBuf()"
+     "default": ""
     }
    ],
    "Definitions": [
     {
      "key": "LocalOnly",
      "kind": "bool",
-     "default": "false"
+     "default": "0"
     },
     {
      "key": "AllowUserChange",
      "kind": "bool",
-     "default": "false"
+     "default": "0"
     },
     {
      "key": "Definitions",
      "kind": "packs",
-     "default": "decltype(Definitions)()"
+     "default": ""
     },
     {
      "key": "SkipDefs",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "Definition1",
@@ -1031,32 +1031,32 @@
     {
      "key": "Mode",
      "kind": "int",
-     "default": "C4S_Cooperative"
+     "default": "0"
     },
     {
      "key": "Elimination",
      "kind": "int",
-     "default": "C4S_EliminateCrew"
+     "default": "1"
     },
     {
      "key": "CooperativeGoal",
      "kind": "int",
-     "default": "C4S_NoGoal"
+     "default": "0"
     },
     {
      "key": "CreateObjects",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "ClearObjects",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "ClearMaterials",
      "kind": "materials",
-     "default": "C4NameList()"
+     "default": ""
     },
     {
      "key": "ValueGain",
@@ -1066,22 +1066,22 @@
     {
      "key": "EnableRemoveFlag",
      "kind": "bool",
-     "default": "false"
+     "default": "0"
     },
     {
      "key": "StructNeedMaterial",
      "kind": "bool",
-     "default": "false"
+     "default": "0"
     },
     {
      "key": "StructNeedEnergy",
      "kind": "bool",
-     "default": "true"
+     "default": "1"
     },
     {
      "key": "ValueOverloads",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "LandscapePushPull",
@@ -1096,7 +1096,7 @@
     {
      "key": "BaseFunctionality",
      "kind": "flags",
-     "default": "BASEFUNC_Default",
+     "default": "all",
      "values": [
       "BASEFUNC_AutoSellContents",
       "BASEFUNC_RegenerateEnergy",
@@ -1110,39 +1110,39 @@
     {
      "key": "BaseRegenerateEnergyPrice",
      "kind": "int",
-     "default": "BASE_RegenerateEnergyPrice"
+     "default": "5"
     },
     {
      "key": "Goals",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "Rules",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "FoWColor",
      "kind": "int",
-     "default": "0u"
+     "default": "0"
     }
    ],
    "Player1": [
     {
      "key": "StandardCrew",
      "kind": "id",
-     "default": "C4ID_None"
+     "default": ""
     },
     {
      "key": "Clonks",
      "kind": "sval",
-     "default": "C4SVal(1, 0, 1, 10)"
+     "default": "1,0,1,10"
     },
     {
      "key": "Wealth",
      "kind": "sval",
-     "default": "C4SVal(0, 0, 0, 250)"
+     "default": "0,0,0,250"
     },
     {
      "key": "Position",
@@ -1156,59 +1156,59 @@
     {
      "key": "Crew",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "Buildings",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "Vehicles",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "Material",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "Knowledge",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "HomeBaseMaterial",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "HomeBaseProduction",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "Magic",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     }
    ],
    "Player2": [
     {
      "key": "StandardCrew",
      "kind": "id",
-     "default": "C4ID_None"
+     "default": ""
     },
     {
      "key": "Clonks",
      "kind": "sval",
-     "default": "C4SVal(1, 0, 1, 10)"
+     "default": "1,0,1,10"
     },
     {
      "key": "Wealth",
      "kind": "sval",
-     "default": "C4SVal(0, 0, 0, 250)"
+     "default": "0,0,0,250"
     },
     {
      "key": "Position",
@@ -1222,59 +1222,59 @@
     {
      "key": "Crew",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "Buildings",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "Vehicles",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "Material",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "Knowledge",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "HomeBaseMaterial",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "HomeBaseProduction",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "Magic",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     }
    ],
    "Player3": [
     {
      "key": "StandardCrew",
      "kind": "id",
-     "default": "C4ID_None"
+     "default": ""
     },
     {
      "key": "Clonks",
      "kind": "sval",
-     "default": "C4SVal(1, 0, 1, 10)"
+     "default": "1,0,1,10"
     },
     {
      "key": "Wealth",
      "kind": "sval",
-     "default": "C4SVal(0, 0, 0, 250)"
+     "default": "0,0,0,250"
     },
     {
      "key": "Position",
@@ -1288,59 +1288,59 @@
     {
      "key": "Crew",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "Buildings",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "Vehicles",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "Material",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "Knowledge",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "HomeBaseMaterial",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "HomeBaseProduction",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "Magic",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     }
    ],
    "Player4": [
     {
      "key": "StandardCrew",
      "kind": "id",
-     "default": "C4ID_None"
+     "default": ""
     },
     {
      "key": "Clonks",
      "kind": "sval",
-     "default": "C4SVal(1, 0, 1, 10)"
+     "default": "1,0,1,10"
     },
     {
      "key": "Wealth",
      "kind": "sval",
-     "default": "C4SVal(0, 0, 0, 250)"
+     "default": "0,0,0,250"
     },
     {
      "key": "Position",
@@ -1354,74 +1354,74 @@
     {
      "key": "Crew",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "Buildings",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "Vehicles",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "Material",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "Knowledge",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "HomeBaseMaterial",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "HomeBaseProduction",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "Magic",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     }
    ],
    "Landscape": [
     {
      "key": "ExactLandscape",
      "kind": "bool",
-     "default": "false"
+     "default": "0"
     },
     {
      "key": "Vegetation",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "VegetationLevel",
      "kind": "sval",
-     "default": "C4SVal(50, 30, 0, 100)"
+     "default": "50,30,0,100"
     },
     {
      "key": "InEarth",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "InEarthLevel",
      "kind": "sval",
-     "default": "C4SVal(50, 0, 0, 100)"
+     "default": "50,0,0,100"
     },
     {
      "key": "Sky",
      "kind": "string",
-     "default": "\"\""
+     "default": ""
     },
     {
      "key": "SkyFade",
@@ -1430,17 +1430,17 @@
     {
      "key": "NoSky",
      "kind": "bool",
-     "default": "false"
+     "default": "0"
     },
     {
      "key": "BottomOpen",
      "kind": "bool",
-     "default": "false"
+     "default": "0"
     },
     {
      "key": "TopOpen",
      "kind": "bool",
-     "default": "true"
+     "default": "1"
     },
     {
      "key": "LeftOpen",
@@ -1455,82 +1455,82 @@
     {
      "key": "AutoScanSideOpen",
      "kind": "bool",
-     "default": "true"
+     "default": "1"
     },
     {
      "key": "MapWidth",
      "kind": "sval",
-     "default": "C4SVal(100, 0, 64, 250)"
+     "default": "100,0,64,250"
     },
     {
      "key": "MapHeight",
      "kind": "sval",
-     "default": "C4SVal(50, 0, 40, 250)"
+     "default": "50,0,40,250"
     },
     {
      "key": "MapZoom",
      "kind": "sval",
-     "default": "C4SVal(10, 0, 5, 15)"
+     "default": "10,0,5,15"
     },
     {
      "key": "Amplitude",
      "kind": "sval",
-     "default": "C4SVal(0)"
+     "default": "0,0,0,100"
     },
     {
      "key": "Phase",
      "kind": "sval",
-     "default": "C4SVal(50)"
+     "default": "50,0,0,100"
     },
     {
      "key": "Period",
      "kind": "sval",
-     "default": "C4SVal(15)"
+     "default": "15,0,0,100"
     },
     {
      "key": "Random",
      "kind": "sval",
-     "default": "C4SVal(0)"
+     "default": "0,0,0,100"
     },
     {
      "key": "Material",
      "kind": "material",
-     "default": "\"Earth\""
+     "default": "Earth"
     },
     {
      "key": "Liquid",
      "kind": "material",
-     "default": "\"Water\""
+     "default": "Water"
     },
     {
      "key": "LiquidLevel",
      "kind": "sval",
-     "default": "C4SVal()"
+     "default": "0,0,0,100"
     },
     {
      "key": "MapPlayerExtend",
      "kind": "bool",
-     "default": "false"
+     "default": "0"
     },
     {
      "key": "Layers",
      "kind": "materials",
-     "default": "C4NameList()"
+     "default": ""
     },
     {
      "key": "Gravity",
      "kind": "sval",
-     "default": "C4SVal(100, 0, 10, 200)"
+     "default": "100,0,10,200"
     },
     {
      "key": "NoScan",
      "kind": "bool",
-     "default": "false"
+     "default": "0"
     },
     {
      "key": "KeepMapCreator",
      "kind": "bool",
-     "default": "false"
+     "default": "0"
     },
     {
      "key": "SkyScrollMode",
@@ -1545,95 +1545,95 @@
     {
      "key": "FoWRes",
      "kind": "int",
-     "default": "static_cast<int32_t>(CClrModAddMap::iDefResolutionX)"
+     "default": "64"
     },
     {
      "key": "ShadeMaterials",
      "kind": "int",
-     "default": "shadeMaterialsDefault"
+     "default": "1 (0 for Version below 4.6.5)"
     },
     {
      "key": "EnableTextureOverlays",
      "kind": "int",
-     "default": "enableTextureOverlaysDefault"
+     "default": "1 (0 for Version below 4.9.5)"
     }
    ],
    "Animals": [
     {
      "key": "Animal",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     },
     {
      "key": "Nest",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     }
    ],
    "Weather": [
     {
      "key": "Climate",
      "kind": "sval",
-     "default": "C4SVal(50, 10)"
+     "default": "50,10,0,100"
     },
     {
      "key": "StartSeason",
      "kind": "sval",
-     "default": "C4SVal(50, 50)"
+     "default": "50,50,0,100"
     },
     {
      "key": "YearSpeed",
      "kind": "sval",
-     "default": "C4SVal(50)"
+     "default": "50,0,0,100"
     },
     {
      "key": "Rain",
      "kind": "sval",
-     "default": "C4SVal()"
+     "default": "0,0,0,100"
     },
     {
      "key": "Wind",
      "kind": "sval",
-     "default": "C4SVal(0, 70, -100, +100)"
+     "default": "0,70,-100,100"
     },
     {
      "key": "Lightning",
      "kind": "sval",
-     "default": "C4SVal()"
+     "default": "0,0,0,100"
     },
     {
      "key": "Precipitation",
      "kind": "material",
-     "default": "\"Water\""
+     "default": "Water"
     },
     {
      "key": "NoGamma",
      "kind": "bool",
-     "default": "true"
+     "default": "1"
     }
    ],
    "Disasters": [
     {
      "key": "Meteorite",
      "kind": "sval",
-     "default": "C4SVal()"
+     "default": "0,0,0,100"
     },
     {
      "key": "Volcano",
      "kind": "sval",
-     "default": "C4SVal()"
+     "default": "0,0,0,100"
     },
     {
      "key": "Earthquake",
      "kind": "sval",
-     "default": "C4SVal()"
+     "default": "0,0,0,100"
     }
    ],
    "Environment": [
     {
      "key": "Objects",
      "kind": "idlist",
-     "default": "C4IDList()"
+     "default": ""
     }
    ]
   }

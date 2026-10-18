@@ -58,16 +58,24 @@
           "value": "="
         },
         {
-          "type": "SYMBOL",
-          "name": "joined_value"
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "joined_value"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
         }
       ]
     },
     "joined_value": {
-      "type": "TOKEN",
+      "type": "IMMEDIATE_TOKEN",
       "content": {
         "type": "PATTERN",
-        "value": ".+"
+        "value": "[^\\r\\n]+"
       }
     },
     "property_values": {
@@ -146,4 +154,3 @@
   "inline": [],
   "supertypes": []
 }
-

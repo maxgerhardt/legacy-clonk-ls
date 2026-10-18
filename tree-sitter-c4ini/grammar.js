@@ -29,11 +29,12 @@ module.exports = grammar({
     property: $ => seq(
       alias($.identifier, 'property_key'),
       '=',
-      $.joined_value,
+      optional($.joined_value),
       //$.property_values,
     ),
 
-    joined_value: $ => token(/.+/),
+    // rest of the line; immediate, so an empty value (`Goals=`) doesn't take the next line
+    joined_value: $ => token.immediate(/[^\r\n]+/),
 
     property_values: $ => seq(
       $.property_value,

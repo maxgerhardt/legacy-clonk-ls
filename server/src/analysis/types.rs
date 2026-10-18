@@ -168,6 +168,12 @@ lazy_static::lazy_static! {
     static ref TREES: Mutex<HashMap<String, Arc<(String, Tree)>>> = Mutex::new(HashMap::new());
 }
 
+/// Key of an in-progress set (recursion detection): per thread, since files are checked in parallel and another
+/// thread working on the same function is no recursion.
+pub(crate) fn busy_key(key: &str) -> String {
+    format!("{:?}|{}", std::thread::current().id(), key)
+}
+
 /// Forget cached return types and parsed scripts (call after files changed).
 pub fn clear_cache() {
     if let Ok(mut s) = SUMMARIES.lock() {
@@ -716,7 +722,7 @@ impl<'a> Infer<'a> {
         }
         {
             let Ok(mut p) = IN_PROGRESS.lock() else { return ANY };
-            if !p.insert(key.clone()) {
+            if !p.insert(busy_key(&key)) {
                 return ANY; // recursion
             }
         }
@@ -738,7 +744,7 @@ impl<'a> Infer<'a> {
             None => ANY,
         };
         if let Ok(mut p) = IN_PROGRESS.lock() {
-            p.remove(&key);
+            p.remove(&busy_key(&key));
         }
         if let Ok(mut m) = SUMMARIES.lock() {
             m.insert(key, t);
@@ -812,7 +818,7 @@ impl<'a> Infer<'a> {
         }
         {
             let Ok(mut p) = IN_PROGRESS.lock() else { return None };
-            if !p.insert(key.clone()) {
+            if !p.insert(busy_key(&key)) {
                 // assigned from its own value (x = x .. [y]): the other assignments decide
                 return Some(FieldType { ty: NONE, writers: 0, scripts: 0 });
             }
@@ -871,7 +877,7 @@ impl<'a> Infer<'a> {
             }
         }
         if let Ok(mut p) = IN_PROGRESS.lock() {
-            p.remove(&key);
+            p.remove(&busy_key(&key));
         }
         let r = FieldType { ty: if writers == 0 { NIL } else { ty }, writers, scripts };
         if let Ok(mut m) = FIELDS.lock() {

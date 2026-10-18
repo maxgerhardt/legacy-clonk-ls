@@ -57,13 +57,31 @@ fn main() {
     }).collect();
     files.sort_by_key(|f| path_key(&f.path));
 
+    // check on all cores (work queue: the scripts differ a lot in cost), print in file order
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(1, 16);
+    let mut results: Vec<(usize, Vec<tower_lsp::lsp_types::Diagnostic>)> = std::thread::scope(|s| {
+        let handles: Vec<_> = (0..threads).map(|_| s.spawn(|| {
+            let mut parser = new_parser();
+            let mut out = vec![];
+            loop {
+                let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let Some(f) = files.get(i) else { break };
+                let src = decode_bytes(&std::fs::read(&f.path).unwrap_or_default());
+                let Some(tree) = parser.parse(&src, None) else { continue };
+                let info = extract(&f.path, &src, &tree);
+                out.push((i, diagnose(&index, &info, &src, &tree)));
+            }
+            out
+        })).collect();
+        handles.into_iter().flat_map(|h| h.join().unwrap()).collect()
+    });
+    results.sort_by_key(|(i, _)| *i);
+
     let (mut n_err, mut n_warn, mut n_info) = (0, 0, 0);
-    let mut parser = new_parser();
-    for f in &files {
-        let src = decode_bytes(&std::fs::read(&f.path).unwrap_or_default());
-        let tree = match parser.parse(&src, None) { Some(t) => t, None => continue };
-        let info = extract(&f.path, &src, &tree);
-        for d in diagnose(&index, &info, &src, &tree) {
+    for (i, diags) in results {
+        let f = files[i];
+        for d in diags {
             let sev = d.severity.unwrap_or(DiagnosticSeverity::ERROR);
             let label = match sev {
                 DiagnosticSeverity::ERROR => { n_err += 1; "error" }

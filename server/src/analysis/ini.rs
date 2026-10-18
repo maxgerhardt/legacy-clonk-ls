@@ -97,18 +97,16 @@ fn kind_text(k: &IniKey) -> String {
         _ => "number",
     };
     match &k.default {
-        Some(d) if !d.is_empty() && d != "\"\"" => format!("{} (default {})", what, clean_default(d)),
-        _ => what.to_string(),
+        Some(d) if d.is_empty() => format!("{} (empty by default)", what),
+        Some(d) => format!("{} (default {})", what, d),
+        None => what.to_string(),
     }
 }
 
-/// C4SVal(100, 0, 64, 250) -> 100,0,64,250; "Earth" -> Earth
-fn clean_default(d: &str) -> String {
-    let d = d.trim();
-    if let Some(inner) = d.strip_prefix("C4SVal(").and_then(|x| x.strip_suffix(')')) {
-        return inner.split(',').map(|p| p.trim()).collect::<Vec<_>>().join(",");
-    }
-    d.trim_matches('"').to_string()
+/// The value part of a default ("0 (1 for GOLD)" -> 0; "all" and "the value of X": none)
+fn default_value(d: &str) -> Option<String> {
+    let v = d.split(" (").next().unwrap_or("").trim();
+    (!v.is_empty() && v != "all" && !v.starts_with("the value of")).then(|| v.to_string())
 }
 
 fn doc(md: String) -> Option<Documentation> {
@@ -309,7 +307,7 @@ pub fn complete(file: IniFile, src: &str, pos: Position, ctx: &Ctx) -> Option<Ve
         _ => {}
     }
     // the engine's default is always a fine value
-    if let Some(d) = spec.default.as_deref().map(clean_default).filter(|d| !d.is_empty() && element.is_empty() && spec.kind != "idlist") {
+    if let Some(d) = spec.default.as_deref().and_then(default_value).filter(|_| element.is_empty() && spec.kind != "idlist") {
         if d.chars().all(|c| c.is_ascii_digit() || c == ',' || c == '-') {
             add(&d, CompletionItemKind::VALUE, "engine default".to_string(), None, None, 999);
         }

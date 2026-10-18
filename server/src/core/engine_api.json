@@ -4751,7 +4751,7 @@
 "arity_known": true,
 "desc": "Returns an object fulfilling the specified search criteria. Search criteria are composed of special Find_x() values.",
 "documented": true,
-"ertype": "any",
+"ertype": "object",
 "params": [
 {
 "desc": "Search criterion in the form of a Find_* function",
@@ -4885,7 +4885,7 @@
 "arity_known": true,
 "desc": "Creates a list of objects which fulfill the specified search criteria. Search criteria are composed of Find_x() values.",
 "documented": true,
-"ertype": "any",
+"ertype": "array",
 "params": [
 {
 "desc": "Search criterion in the form of a Find_* function",
@@ -9213,7 +9213,7 @@
 "arity_known": true,
 "desc": "Returns the number of objects fulfilling the specified search criteria. Search criteria are composed of Find_x() function values.",
 "documented": true,
-"ertype": "any",
+"ertype": "int",
 "params": [
 {
 "desc": "Search criterion in the form of a Find_* function",

@@ -46,8 +46,10 @@ def parse_engine(src_dir):
             params.append({"name": pname, "type": TYPE_MAP.get(ctype, "any")})
         funcs[name] = {"params": params, "rtype": RTYPE_MAP.get(rtype, "any")}
     # Functions registered with a fixed array of 10 criteria parameters
-    for name in re.findall(r'new C4AulEngineFuncParArray<\d+, \w+>\s*\{pEngine, "(\w+)"', s):
-        funcs[name] = {"params": [{"name": f"criteria{i + 1}", "type": "array"} for i in range(10)], "rtype": "any"}
+    # (the template's C4V_ type is the return type: FindObject2 -> object)
+    vtypes = {"C4Object": "object", "Int": "int", "Bool": "bool", "Array": "array", "C4ID": "id", "String": "string"}
+    for vt, name in re.findall(r'new C4AulEngineFuncParArray<\d+, C4V_(\w+)>\s*\{pEngine, "(\w+)"', s):
+        funcs[name] = {"params": [{"name": f"criteria{i + 1}", "type": "array"} for i in range(10)], "rtype": vtypes.get(vt, "any")}
     # Cast functions: CastInt(x), ScoreboardCol(id), ...
     for to_type, name in re.findall(r'new C4AulDefCastFunc<\w+, C4V_(\w+)>\{pEngine, "(\w+)"\}', s):
         funcs[name] = {"params": [{"name": "value", "type": "any"}],

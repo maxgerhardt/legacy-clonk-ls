@@ -5,6 +5,8 @@ from the adaptor and the default (mkBitfieldAdapt + table -> named flags, mkC4ID
 C4SVal -> Std,Rnd,Min,Max, true/false -> bool, mkArrayAdapt -> int list, strings, ints). Some string keys get a
 better kind by name (Procedure, NextAction, *Call, Material, ...). Materials and Material-Texture pairs come from the
 content repo's Material.c4g, the standard pack names from the content folder.
+Defaults are written as the value a file would contain (engine constants resolved to their numbers, C4SVal filled
+up to Std,Rnd,Min,Max, true/false -> 1/0); "" = empty (no ID, empty list or text).
 
 Usage (in legacy-clonk-ls/): python tools/gen_ini_api.py ../LegacyClonk/src ../content
 """
@@ -33,6 +35,58 @@ UNITS = [
 
 def read(name):
     return open(os.path.join(SRC, name), encoding="utf-8", errors="replace").read()
+
+
+# defaults that depend on something else: written out by hand (C4Scenario.cpp)
+DEFAULT_NOTES = {
+    "BaseAutoSell": "0 (1 for GOLD)",
+    "MaxPlayerLeague": "the value of MaxPlayer",
+    "ShadeMaterials": "1 (0 for Version below 4.6.5)",
+    "EnableTextureOverlays": "1 (0 for Version below 4.9.5)",
+}
+_ALL_SRC = None
+
+
+def constant(name):
+    """The number an engine constant (`X = 5`, `#define X 5`, enum member) stands for, or None."""
+    global _ALL_SRC
+    if _ALL_SRC is None:
+        _ALL_SRC = "\n".join(read(f) for f in os.listdir(SRC) if f.endswith((".h", ".cpp")))
+    m = re.search(r"\b" + re.escape(name) + r"\s*(?:=\s*|\s+)(0x[0-9a-fA-F]+|-?\d+)\b", _ALL_SRC)
+    return str(int(m.group(1), 0)) if m else None
+
+
+def readable(key, kind, default):
+    """The engine default as the text a file would contain."""
+    d = default.strip()
+    if key in DEFAULT_NOTES:
+        return DEFAULT_NOTES[key]
+    if re.fullmatch(r"(C4IDList|C4NameList|StdStrBuf|decltype\(\w+\))\(\)|\"\"|C4ID_None", d):
+        return ""
+    if d.startswith('"'):
+        return d.strip('"')
+    if d in ("true", "false"):
+        return "1" if d == "true" else "0"
+    m = re.fullmatch(r"C4SVal\((.*)\)", d)
+    if m:
+        vals = [v.strip().lstrip("+") for v in m.group(1).split(",") if v.strip()]
+        return ",".join(vals + ["0", "0", "0", "100"][len(vals):])
+    if d in ("TargetRect0",):
+        return "0,0,0,0,0,0"
+    if d in ("Rect0",):
+        return "0,0,0,0"
+    m = re.fullmatch(r"fSection \? \w+ : (-?\d+)", d)  # sections take the main scenario's value
+    if m:
+        return m.group(1)
+    m = re.fullmatch(r"(-?\d+)u?", d)
+    if m:
+        return m.group(1)
+    m = re.fullmatch(r"(?:static_cast<\w+>\()?(?:\w+::)?(\w+)\)?", d)
+    if m:
+        v = constant(m.group(1))
+        if v is not None:
+            return "all" if kind == "flags" and v == str(0xffff) else v
+    raise SystemExit(f"unreadable default for {key}: {default!r} (add it to DEFAULT_NOTES)")
 
 
 def body(text, func):
@@ -111,7 +165,7 @@ def kind_of(value, key, default, tabs):
         return "sval", None
     if default in ("true", "false"):
         return "bool", None
-    if "mkArrayAdapt" in value or default.startswith("TargetRect"):
+    if "mkArrayAdapt" in value or default.startswith(("TargetRect", "Rect0")):
         return "ints", None
     if default.startswith('"') or "mkString" in value or "toC4CStr" in value or "StdStrBuf" in default:
         return STRING_KINDS.get(key, "string"), None
@@ -136,7 +190,7 @@ def main():
                 values = re.findall(r'"([A-Z]+)"', re.search(r"ProcedureName\[[^\]]*\]\s*=\s*\{(.*?)\};", text, re.S).group(1)) + ["NONE"]
             entry = {"key": key, "kind": k}
             if default:
-                entry["default"] = default
+                entry["default"] = readable(key, k, default)
             if values:
                 entry["values"] = values
             if not any(e["key"] == key for e in keys):
