@@ -6,6 +6,7 @@ pub struct Highlighter;
 
 impl Highlighter {
 
+    #[cfg(test)]
     pub fn collect_tokens(tree: &Tree, lut: TokenTypes) -> Vec<SemanticToken> {
         Self::collect_tokens_with_source(tree, lut, "")
     }
