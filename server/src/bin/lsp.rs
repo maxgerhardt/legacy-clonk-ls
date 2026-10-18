@@ -466,6 +466,7 @@ impl LanguageServer for Backend {
                 document_formatting_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+                rename_provider: Some(OneOf::Right(RenameOptions { prepare_provider: Some(true), work_done_progress_options: Default::default() })),
                 references_provider: Some(OneOf::Left(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
@@ -660,6 +661,33 @@ impl LanguageServer for Backend {
                 self.client.show_message(MessageType::INFO, format!("c4format: left unchanged ({})", reason)).await;
                 Ok(None)
             }
+        }
+    }
+
+    /// Rename (F2): only exact cases (query::rename_targets); the reason otherwise shows in the editor.
+    async fn prepare_rename(&self, params: TextDocumentPositionParams) -> Result<Option<PrepareRenameResponse>> {
+        let r = self.with_script(&params.text_document.uri, |idx, info, doc| query::rename_targets(idx, info, &doc.tree, &doc.source, params.position));
+        match r {
+            Some(Ok((range, name, _))) => Ok(Some(PrepareRenameResponse::RangeWithPlaceholder { range, placeholder: name })),
+            Some(Err(msg)) => Err(tower_lsp::jsonrpc::Error { code: tower_lsp::jsonrpc::ErrorCode::InvalidRequest, message: msg.into(), data: None }),
+            None => Ok(None),
+        }
+    }
+
+    async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+        let p = params.text_document_position;
+        let new_name = params.new_name;
+        let r = self.with_script(&p.text_document.uri, |idx, info, doc| query::rename(idx, info, &doc.tree, &doc.source, p.position, &new_name));
+        match r {
+            Some(Ok(locs)) => {
+                let mut changes: std::collections::HashMap<Url, Vec<TextEdit>> = std::collections::HashMap::new();
+                for l in locs {
+                    changes.entry(l.uri).or_default().push(TextEdit { range: l.range, new_text: new_name.clone() });
+                }
+                Ok(Some(WorkspaceEdit { changes: Some(changes), ..Default::default() }))
+            }
+            Some(Err(msg)) => Err(tower_lsp::jsonrpc::Error { code: tower_lsp::jsonrpc::ErrorCode::InvalidRequest, message: msg.into(), data: None }),
+            None => Ok(None),
         }
     }
 

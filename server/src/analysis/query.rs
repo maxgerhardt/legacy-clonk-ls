@@ -477,3 +477,105 @@ pub fn workspace_symbols(index: &Index, query: &str) -> Vec<SymbolInformation> {
     out.truncate(200);
     out
 }
+
+/// What renaming the name at `pos` touches: (its range at `pos`, the old name, every location), or why it can't be
+/// renamed. Exact cases only: a variable/parameter or map key of a function (within the function), a private
+/// function (its definition and the direct calls in its definition family). Everything reachable by name from
+/// elsewhere (public functions, script variables, IDs) is refused: other objects, strings and the engine use them.
+pub fn rename_targets(index: &Index, info: &FileInfo, tree: &Tree, src: &str, pos: Position) -> Result<(Range, String, Vec<Location>), String> {
+    let li = LineIndex::new(src);
+    let p = li.to_point(pos);
+    let at = tree.root_node().named_descendant_for_point_range(p, p).filter(|n| n.kind() == "identifier").ok_or("nothing to rename here")?;
+    let range = li.node_range(&at);
+    let in_function = |func: Node, name: &str, keys: bool| -> Vec<Location> {
+        let mut out = vec![];
+        let mut stack = vec![func];
+        while let Some(n) = stack.pop() {
+            if n.kind() == "identifier" && is_map_key(&n) == keys && node_text(&n, src) == name {
+                out.extend(loc(&info.path, li.node_range(&n)));
+            }
+            stack.extend(super::index::named_children(&n));
+        }
+        out
+    };
+    match target_at(tree, src, &li, pos).ok_or("nothing to rename here")? {
+        Target::Ident { name, node } => {
+            let func = enclosing_function(&node).ok_or("only variables and parameters of a function can be renamed")?;
+            if name == "this" || local_declaration(&func, &name, src, &li).is_none() {
+                return Err(format!("\"{}\" isn't a variable or parameter of this function (script variables can't be renamed: other scripts may use them)", name));
+            }
+            Ok((range, name.clone(), in_function(func, &name, false)))
+        }
+        Target::MapKey { name, node } => {
+            let func = enclosing_function(&node).ok_or("only map keys inside a function can be renamed")?;
+            Ok((range, name.clone(), in_function(func, &name, true)))
+        }
+        Target::Call { name, .. } | Target::FuncDef { name } => {
+            let defs = index.visible_funcs(info, &name);
+            let (def_file, def) = match defs.as_slice() {
+                [one] => *one,
+                [] => return Err(format!("\"{}\" is no script function of this definition", name)),
+                _ => return Err(format!("\"{}\" is defined more than once (an overload chain): rename by hand", name)),
+            };
+            if def.visibility.as_deref() != Some("private") {
+                return Err(format!("only private functions can be renamed: \"{}\" may be called by other objects, strings or the engine", name));
+            }
+            let def_file: &FileInfo = if path_key(&def_file.path) == path_key(&info.path) { info } else { def_file };
+            let mut family: Vec<&FileInfo> = index.family(def_file);
+            if !family.iter().any(|f| path_key(&f.path) == path_key(&def_file.path)) {
+                family.push(def_file);
+            }
+            let family: Vec<&FileInfo> = family.into_iter().map(|f| if path_key(&f.path) == path_key(&info.path) { info } else { f }).collect();
+            if index.named_in_strings_of(def_file, Some(&family), &name) || family.iter().any(|f| f.ini_calls.iter().any(|(n, _, _)| *n == name)) {
+                return Err(format!("\"{}\" is named in a string, ActMap or DefCore (Schedule, Call, ...): rename by hand", name));
+            }
+            let mut out = vec![];
+            for f in &family {
+                if f.path.to_string_lossy().replace('\\', "/").to_lowercase().contains("legacy-clonk-ls/packs") {
+                    return Err("a script of this definition is an unpacked game pack (read-only copy)".to_string());
+                }
+                for c in f.calls.iter().filter(|c| c.name == name) {
+                    if c.arrow {
+                        return Err(format!("{} calls ->{}(): that may reach another object, rename by hand", f.path.display(), name));
+                    }
+                    out.extend(loc(&f.path, c.range));
+                }
+                for d in f.funcs.iter().filter(|d| d.name == name) {
+                    out.extend(loc(&f.path, d.name_range));
+                }
+            }
+            Ok((range, name.clone(), out))
+        }
+        Target::Id { .. } => Err("definition IDs can't be renamed here".to_string()),
+    }
+}
+
+/// The edits of a rename to `new_name` (see rename_targets), or why not.
+pub fn rename(index: &Index, info: &FileInfo, tree: &Tree, src: &str, pos: Position, new_name: &str) -> Result<Vec<Location>, String> {
+    let valid = new_name.chars().next().map(|c| c.is_ascii_alphabetic() || c == '_').unwrap_or(false)
+        && new_name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    if !valid {
+        return Err(format!("\"{}\" is no valid name (letters, digits, _)", new_name));
+    }
+    if super::engine::KEYWORDS.contains(&new_name) || ENGINE.functions.contains_key(new_name) || ENGINE.constants.contains_key(new_name) {
+        return Err(format!("\"{}\" is a keyword or engine function/constant", new_name));
+    }
+    if new_name.len() == 4 && new_name.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_') {
+        return Err(format!("\"{}\" looks like a definition ID (the engine reads it as one)", new_name));
+    }
+    let (_, old, locs) = rename_targets(index, info, tree, src, pos)?;
+    // the new name must not be taken where it would apply
+    let li = LineIndex::new(src);
+    if let Some(Target::Ident { node, .. }) = target_at(tree, src, &li, pos) {
+        if let Some(func) = enclosing_function(&node) {
+            if local_declaration(&func, new_name, src, &li).is_some() {
+                return Err(format!("\"{}\" is already a variable of this function", new_name));
+            }
+        }
+    }
+    if matches!(target_at(tree, src, &li, pos), Some(Target::Call { .. }) | Some(Target::FuncDef { .. })) && !index.visible_funcs(info, new_name).is_empty() {
+        return Err(format!("a function \"{}\" already exists here", new_name));
+    }
+    let _ = old;
+    Ok(locs)
+}
