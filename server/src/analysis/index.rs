@@ -71,6 +71,9 @@ pub struct FileInfo {
     pub vars: Vec<VarDef>,
     pub calls: Vec<CallSite>,
     pub id_refs: Vec<(String, Range)>,
+    /// script variables assigned in a function: (name, function index, member) - member = obj.name = x or
+    /// LocalN("name") = x, else a plain assignment of a name that isn't a parameter/var of the function
+    pub writes: Vec<(String, usize, bool)>,
 }
 
 #[derive(Debug, Clone)]
@@ -106,6 +109,10 @@ struct Lookup {
     statics: HashMap<String, Vec<(String, usize)>>,
     /// #appendto target ID (or "*") -> scripts appending to it
     appenders: HashMap<String, Vec<String>>,
+    /// #include target ID -> scripts including it
+    includers: HashMap<String, Vec<String>>,
+    /// variable name -> (script, function index, member write)
+    writers: HashMap<String, Vec<(String, usize, bool)>>,
     /// lowercase names of the .c4d/.c4f folders that indexed scripts lie in (which packs are indexed)
     pack_dirs: HashSet<String>,
 }
@@ -129,6 +136,12 @@ impl Lookup {
             }
             for t in &f.appendto {
                 l.appenders.entry(t.clone()).or_default().push(key.clone());
+            }
+            for t in &f.includes {
+                l.includers.entry(t.clone()).or_default().push(key.clone());
+            }
+            for (name, i, member) in &f.writes {
+                l.writers.entry(name.clone()).or_default().push((key.clone(), *i, *member));
             }
             for seg in key.split('/') {
                 let seg = seg.to_lowercase();
@@ -352,6 +365,7 @@ pub fn extract(path: &Path, src: &str, tree: &Tree) -> FileInfo {
         vars: vec![],
         calls: vec![],
         id_refs: vec![],
+        writes: vec![],
     };
     let mut stack = vec![tree.root_node()];
     while let Some(n) = stack.pop() {
@@ -368,6 +382,9 @@ pub fn extract(path: &Path, src: &str, tree: &Tree) -> FileInfo {
                                 }
                             }
                         }
+                    }
+                    for (w, member) in function_writes(&n, src) {
+                        info.writes.push((w, info.funcs.len(), member));
                     }
                     info.funcs.push(FuncDef {
                         name: node_text(&name, src).to_string(),
@@ -423,6 +440,80 @@ pub fn extract(path: &Path, src: &str, tree: &Tree) -> FileInfo {
         stack.extend(kids);
     }
     info
+}
+
+const ASSIGN_OPS: &[&str] = &["=", "+=", "-=", "*=", "/=", "%=", "**=", "<<=", ">>=", "&=", "|=", "^=", "..=", "??="];
+
+/// Script variables a function assigns: plain names that aren't its parameters/vars (`n = 1`, `n++`, `n[] = x`),
+/// and other objects' locals (`obj.n = x`, `LocalN("n", obj) = x`) as member writes.
+fn function_writes(f: &Node, src: &str) -> Vec<(String, bool)> {
+    let mut locals = HashSet::new();
+    let mut stack = vec![*f];
+    while let Some(n) = stack.pop() {
+        match n.kind() {
+            "param" => locals.extend(n.child_by_field_name("name").map(|x| node_text(&x, src).to_string())),
+            "var_assignment" => {
+                let is_var = n.parent().map(|p| named_children(&p).iter().any(|c| c.kind() == "var_scope" && node_text(c, src) == "var")).unwrap_or(false);
+                if is_var {
+                    locals.extend(named_children(&n).first().map(|x| node_text(x, src).to_string()));
+                }
+            }
+            "for_statement" if children(&n).iter().any(|c| c.kind() == "var") => {
+                for id in named_children(&n).into_iter().take_while(|c| c.kind() == "identifier") {
+                    locals.insert(node_text(&id, src).to_string());
+                }
+            }
+            _ => {}
+        }
+        stack.extend(named_children(&n));
+    }
+    let op = |n: &Node| children(n).iter().find(|c| !c.is_named() && !matches!(c.kind(), "(" | ")")).map(|c| c.kind().to_string()).unwrap_or_default();
+    let mut out: Vec<(String, bool)> = vec![];
+    let mut push = |name: &str, member: bool| {
+        if !out.iter().any(|(n, m)| n == name && *m == member) {
+            out.push((name.to_string(), member));
+        }
+    };
+    let mut stack = vec![*f];
+    while let Some(n) = stack.pop() {
+        let lhs = match n.kind() {
+            "binary_expression" if ASSIGN_OPS.contains(&op(&n).as_str()) => named_children(&n).into_iter().find(|c| c.kind() != "comment"),
+            "unary_expression" if matches!(op(&n).as_str(), "++" | "--") => named_children(&n).into_iter().find(|c| c.kind() != "comment"),
+            _ => None,
+        };
+        if let Some(l) = lhs {
+            let dot = children(&l).iter().any(|c| c.kind() == ".");
+            match l.kind() {
+                "identifier" => {
+                    let name = node_text(&l, src);
+                    if !locals.contains(name) && name != "this" {
+                        push(name, false);
+                    }
+                }
+                "array_append" | "map_access" if !dot => {
+                    if let Some(b) = named_children(&l).into_iter().next().filter(|b| b.kind() == "identifier") {
+                        if !locals.contains(node_text(&b, src)) {
+                            push(node_text(&b, src), false);
+                        }
+                    }
+                }
+                "map_access" => {
+                    if let Some(k) = named_children(&l).get(1) {
+                        push(node_text(k, src), true);
+                    }
+                }
+                "method_call" if l.child_by_field_name("name").map(|x| node_text(&x, src) == "LocalN").unwrap_or(false) => {
+                    let first = l.child_by_field_name("args").and_then(|a| named_children(&a).into_iter().find(|c| c.kind() != "comment"));
+                    if let Some(s) = first.filter(|s| s.kind() == "string") {
+                        push(node_text(&s, src).trim_matches('"'), true);
+                    }
+                }
+                _ => {}
+            }
+        }
+        stack.extend(named_children(&n));
+    }
+    out
 }
 
 /// Comment lines directly above a function definition.
@@ -736,6 +827,39 @@ impl Index {
                         if self.visible_from(&info.path, &other.path) {
                             todo.push(other);
                         }
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Functions assigning the script variable `name`: (script, function index, member write).
+    pub fn writers<'a>(&'a self, name: &str) -> Vec<(&'a FileInfo, usize, bool)> {
+        self.lookup().writers.get(name).into_iter().flatten()
+            .filter_map(|(k, i, m)| self.files.get(k).map(|f| (f, *i, *m)))
+            .collect()
+    }
+
+    /// Every script whose objects share `def`'s locals: its scope (#include chain, #appendto) and the scripts that
+    /// #include or #appendto it (transitively).
+    pub fn family<'a>(&'a self, def: &'a FileInfo) -> Vec<&'a FileInfo> {
+        let mut out = self.scope_files(def);
+        let mut seen: HashSet<String> = out.iter().map(|f| path_key(&f.path)).collect();
+        let mut todo: Vec<String> = def.def_id.iter().cloned().collect();
+        let mut seen_ids = HashSet::new();
+        while let Some(id) = todo.pop() {
+            if !seen_ids.insert(id.clone()) {
+                continue;
+            }
+            let lk = self.lookup();
+            for key in lk.includers.get(&id).into_iter().flatten().chain(lk.appenders.get(&id).into_iter().flatten()) {
+                if let Some(f) = self.files.get(key) {
+                    if seen.insert(key.clone()) {
+                        out.push(f);
+                    }
+                    if let Some(i) = &f.def_id {
+                        todo.push(i.clone());
                     }
                 }
             }

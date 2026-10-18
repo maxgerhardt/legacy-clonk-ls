@@ -206,7 +206,17 @@ standard definition from `{}`", id, std.name, std.tlc));
                 VarKind::StaticConst => "static const",
             };
             let value = v.value.as_ref().map(|x| format!(" = {}", x)).unwrap_or_default();
-            Some(format!("```c4script\n{} {}{}\n```\n`{}:{}`", kind, name, value, f.path.display(), v.range.start.line + 1))
+            // inferred from all assignments (types.rs field_type)
+            let (ty, note) = match super::types::field_type(index, info, src, &name) {
+                Some(ft) if v.kind == VarKind::StaticConst || ft.ty == super::types::ANY => (String::new(), String::new()),
+                Some(ft) if ft.writers == 0 => (": nil".to_string(), "\n\nnever assigned in the indexed scripts *(inferred)*".to_string()),
+                Some(ft) => (
+                    format!(": {}", super::types::display(ft.ty)),
+                    format!("\n\nfrom {} assigning function(s) in {} script(s); nil until first assigned *(inferred)*", ft.writers, ft.scripts),
+                ),
+                None => (String::new(), String::new()),
+            };
+            Some(format!("```c4script\n{} {}{}{}\n```\n`{}:{}`{}", kind, name, ty, value, f.path.display(), v.range.start.line + 1, note))
         }
     }
 }

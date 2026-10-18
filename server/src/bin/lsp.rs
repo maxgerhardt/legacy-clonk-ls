@@ -387,6 +387,9 @@ impl LanguageServer for Backend {
             if let Some(tc) = opts.get("typeChecks").and_then(|v| v.as_bool()) {
                 legacy_clonk_ls::analysis::diagnostics::TYPE_CHECKS.store(tc, std::sync::atomic::Ordering::Relaxed);
             }
+            if let Some(ft) = opts.get("fieldTypes").and_then(|v| v.as_bool()) {
+                legacy_clonk_ls::analysis::diagnostics::FIELD_TYPES.store(ft, std::sync::atomic::Ordering::Relaxed);
+            }
         }
         if let Ok(mut g) = self.game.write() {
             *g = game_dir.map(|d| (d, all_packs));

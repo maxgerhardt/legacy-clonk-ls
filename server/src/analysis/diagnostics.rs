@@ -360,7 +360,7 @@ impl<'a> Ctx<'a> {
                     if !members(t).iter().all(|m| never_converts(m, ty.as_str())) {
                         continue;
                     }
-                    display(t)
+                    display(kinds(t)) // the engine's message names plain types (array, not array<int>)
                 }
             };
             let got = got.as_str();
@@ -609,6 +609,15 @@ fn engine_params(ef: &super::engine::EngineFunc) -> Vec<(String, String)> {
 /// Type checks (arg-type) can be turned off: LSP initializationOptions `"typeChecks": false`, c4check
 /// `--no-type-checks`, or the environment variable C4LS_TYPE_CHECKS=0.
 pub static TYPE_CHECKS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Infer the types of script variables (local/static) from all their assignments (needs type checks on).
+pub static FIELD_TYPES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn field_types_enabled() -> bool {
+    type_checks_enabled()
+        && FIELD_TYPES.load(std::sync::atomic::Ordering::Relaxed)
+        && std::env::var("C4LS_FIELD_TYPES").map(|v| v != "0").unwrap_or(true)
+}
 
 pub fn type_checks_enabled() -> bool {
     TYPE_CHECKS.load(std::sync::atomic::Ordering::Relaxed) && std::env::var("C4LS_TYPE_CHECKS").map(|v| v != "0").unwrap_or(true)

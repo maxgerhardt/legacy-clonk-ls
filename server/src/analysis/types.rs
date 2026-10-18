@@ -7,7 +7,12 @@
 //! return statements of script functions (summaries, computed on demand across scripts and cached).
 //! Engine rules followed (C4AulExec): `&&`/`||` give one of their operands from #strict 2 on (a bool before),
 //! `a ?? b` gives a unless it is nil, arithmetic gives int, comparisons bool, `..` a string (or an array).
-//! Unknown is `any` (untyped parameters, object locals, array elements, Par()).
+//! Arrays carry the union of their element types (`array<int>`: from literals, `a[] = x`, `a[i] = x`, `..`,
+//! FindObjects), so `for (var x in a)` types x; reading `a[i]` adds nil (out of range).
+//! Script variables (`local`, `static`, `static const`) get the union of every value assigned to them: a `local` from
+//! the scripts of its definition (with its #include/#appendto family) plus `obj.name = x` / `LocalN("name") = x`
+//! writes anywhere, a `static` from every indexed script that assigns it (field_types_enabled() switches this off).
+//! Unknown is `any` (untyped parameters, Par(), map values).
 
 use super::engine::ENGINE;
 use super::index::{children, is_arrow_call, named_children, new_parser, path_key, FileInfo, FuncDef, Index};
@@ -26,7 +31,31 @@ pub const OBJECT: Ty = 16;
 pub const STRING: Ty = 32;
 pub const ARRAY: Ty = 64;
 pub const MAP: Ty = 128;
-pub const ANY: Ty = 0xFF;
+/// low byte: the kinds above; high byte: the element types of an array (meaningful with ARRAY, 0xFF = unknown)
+pub const ANY: Ty = 0xFFFF;
+pub const ARRAY_ANY: Ty = ARRAY | 0xFF00;
+
+/// An array whose elements have type `elem` (the elements' own element types are not kept).
+pub fn array_of(elem: Ty) -> Ty {
+    ARRAY | ((elem & 0xFF) << 8)
+}
+
+/// The kinds of a type without array element types.
+pub fn kinds(t: Ty) -> Ty {
+    t & 0xFF
+}
+
+/// Element type of an array type (nested arrays have unknown elements).
+pub fn elements(t: Ty) -> Ty {
+    let e = (t >> 8) & 0xFF;
+    if e == 0xFF {
+        ANY
+    } else if e & ARRAY != 0 {
+        e | 0xFF00
+    } else {
+        e
+    }
+}
 
 const NAMES: [(Ty, &str); 8] =
     [(INT, "int"), (BOOL, "bool"), (ID, "id"), (OBJECT, "object"), (STRING, "string"), (ARRAY, "array"), (MAP, "map"), (NIL, "nil")];
@@ -39,7 +68,7 @@ pub fn from_name(s: &str) -> Ty {
         "id" => ID,
         "object" => OBJECT,
         "string" => STRING,
-        "array" => ARRAY,
+        "array" => ARRAY_ANY,
         "map" => MAP,
         "void" => NIL,
         _ => ANY,
@@ -58,15 +87,34 @@ pub fn display(t: Ty) -> String {
     if t == NONE {
         return "never (unreachable)".to_string();
     }
-    NAMES.iter().filter(|(b, _)| t & b != 0).map(|(_, n)| *n).collect::<Vec<_>>().join(" | ")
+    NAMES.iter()
+        .filter(|(b, _)| t & b != 0)
+        .map(|(b, n)| {
+            if *b != ARRAY {
+                return n.to_string();
+            }
+            let e = elements(t);
+            if e == ANY {
+                "array".to_string()
+            } else if e == NONE {
+                "array<empty>".to_string()
+            } else {
+                format!("array<{}>", display(e))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" | ")
 }
 
 /// Return type of an engine function, from its C++ signature: objects, strings, arrays, maps and IDs can be
 /// nil (failure); C4Value returns are `any`.
 pub fn engine_return(name: &str) -> Option<Ty> {
     let ef = ENGINE.functions.get(name)?;
-    if name == "Format" {
-        return Some(STRING);
+    match name {
+        "Format" => return Some(STRING),
+        "FindObjects" => return Some(array_of(OBJECT)),
+        "CreateArray" => return Some(array_of(NIL)),
+        _ => {}
     }
     let t = from_name(if ef.ertype.is_empty() { &ef.rtype } else { &ef.ertype });
     if t == ANY {
@@ -95,10 +143,26 @@ fn merge(a: Option<State>, b: Option<State>) -> Option<State> {
 pub struct FuncTypes {
     pub at: HashMap<usize, Ty>,
     pub returns: Ty,
+    /// values assigned to script variables (identifiers that aren't parameters/vars of the function)
+    pub writes: HashMap<String, Ty>,
+    /// values assigned to other objects' locals: obj.name = x, LocalN("name", obj) = x, with the object's
+    /// definition when the expression shows it (this, CreateObject(ID, ...), FindObject(Find_ID(ID)), ...)
+    pub member_writes: HashMap<String, Vec<(Option<String>, Ty)>>,
+}
+
+/// Inferred type of a script variable.
+#[derive(Clone, Copy, Debug)]
+pub struct FieldType {
+    pub ty: Ty,
+    /// number of assigning functions and of scripts they are in
+    pub writers: usize,
+    pub scripts: usize,
 }
 
 lazy_static::lazy_static! {
     static ref SUMMARIES: Mutex<HashMap<String, Ty>> = Mutex::new(HashMap::new());
+    /// script variable types: "local|<def script>|name" / "static|name" -> (type, assignments, scripts)
+    static ref FIELDS: Mutex<HashMap<String, FieldType>> = Mutex::new(HashMap::new());
     static ref IN_PROGRESS: Mutex<HashSet<String>> = Mutex::new(HashSet::new());
     /// parsed scripts whose functions were summarised (source, tree)
     static ref TREES: Mutex<HashMap<String, Arc<(String, Tree)>>> = Mutex::new(HashMap::new());
@@ -107,6 +171,9 @@ lazy_static::lazy_static! {
 /// Forget cached return types and parsed scripts (call after files changed).
 pub fn clear_cache() {
     if let Ok(mut s) = SUMMARIES.lock() {
+        s.clear();
+    }
+    if let Ok(mut s) = FIELDS.lock() {
         s.clear();
     }
     if let Ok(mut t) = TREES.lock() {
@@ -305,17 +372,20 @@ impl<'a> Infer<'a> {
             // for ([var] x in a) / for ([var] i, x in a): the collection, then the loop variables are unknown
             let named: Vec<Node> = all.iter().filter(|c| c.is_named() && c.kind() != "comment").copied().collect();
             let in_pos = all.iter().position(|c| c.kind() == "in").unwrap_or(0);
-            if let Some(coll) = all.iter().skip(in_pos + 1).find(|c| c.is_named()) {
-                self.expr(*coll, &mut s);
-            }
+            let tc = match all.iter().skip(in_pos + 1).find(|c| c.is_named()) {
+                Some(coll) => self.expr(*coll, &mut s),
+                None => ANY,
+            };
             let vars: Vec<Node> = all.iter().take(in_pos).filter(|c| c.kind() == "identifier").copied().collect();
+            // one variable: the array's elements (C4AulExec AB_FOREACH_NEXT); two: key and value of a map
+            let elem = if vars.len() == 1 && kinds(tc) & !NIL == ARRAY { elements(tc) } else { ANY };
             for v in &vars {
                 if let Some(st) = s.as_mut() {
                     if self.locals.contains(self.text(v)) {
-                        st.insert(self.text(v).to_string(), ANY);
+                        st.insert(self.text(v).to_string(), elem);
                     }
                 }
-                self.out.at.insert(v.id(), ANY);
+                self.out.at.insert(v.id(), elem);
             }
             let _ = named;
             return self.run_loop(None, body, None, s);
@@ -370,11 +440,17 @@ impl<'a> Infer<'a> {
     }
 
     fn assign(&mut self, lhs: &Node, t: Ty, s: &mut Option<State>) {
-        if lhs.kind() == "identifier" && self.locals.contains(self.text(lhs)) {
+        if lhs.kind() != "identifier" {
+            return;
+        }
+        let name = self.text(lhs);
+        if self.locals.contains(name) {
             if let Some(st) = s.as_mut() {
-                st.insert(self.text(lhs).to_string(), t);
+                st.insert(name.to_string(), t);
             }
             self.out.at.insert(lhs.id(), t);
+        } else if name != "this" {
+            *self.out.writes.entry(name.to_string()).or_insert(NONE) |= t;
         }
     }
 
@@ -396,10 +472,11 @@ impl<'a> Infer<'a> {
                 if self.text(&n).chars().all(|c| c.is_ascii_digit()) { INT } else { ID }
             }
             "array" => {
-                for c in named_children(&n) {
-                    self.expr(c, s);
+                let mut elem = NONE;
+                for c in named_children(&n).into_iter().filter(|c| c.kind() != "comment") {
+                    elem |= self.expr(c, s);
                 }
-                ARRAY
+                array_of(elem)
             }
             "map" => {
                 for e in named_children(&n).into_iter().filter(|c| c.kind() == "map_entry") {
@@ -418,8 +495,23 @@ impl<'a> Infer<'a> {
                 } else if let Some(c) = ENGINE.constants.get(name) {
                     from_name(&c.ty)
                 } else {
-                    ANY
+                    self.field(name).map(|f| f.ty).unwrap_or(ANY)
                 }
+            }
+            "map_access" => {
+                let nc: Vec<Node> = named_children(&n).into_iter().filter(|c| c.kind() != "comment").collect();
+                let dot = children(&n).iter().any(|c| c.kind() == ".");
+                let tb = match nc.first() {
+                    Some(b) => self.expr(*b, s),
+                    None => ANY,
+                };
+                if !dot {
+                    if let Some(i) = nc.get(1) {
+                        self.expr(*i, s);
+                    }
+                }
+                // a[i] of an array: an element, or nil out of range
+                if !dot && kinds(tb) & !NIL == ARRAY { elements(tb) | NIL } else { ANY }
             }
             "unary_expression" => {
                 let op = self.op(&n);
@@ -470,10 +562,49 @@ impl<'a> Infer<'a> {
         match op.as_str() {
             "=" => {
                 let tr = self.expr(r, s);
-                if l.kind() != "identifier" {
-                    self.expr(l, s);
+                match l.kind() {
+                    "identifier" => self.assign(&l, tr, s),
+                    // a[] = x, a[i] = x: the array also holds x now
+                    "array_append" | "map_access" if !children(&l).iter().any(|c| c.kind() == ".") => {
+                        self.expr(l, s);
+                        if let Some(base) = named_children(&l).into_iter().next().filter(|b| b.kind() == "identifier") {
+                            let cur = self.expr(base, s);
+                            if kinds(cur) & ARRAY != 0 {
+                                self.assign(&base, cur | array_of(tr), s);
+                            } else if !self.locals.contains(self.text(&base)) {
+                                self.assign(&base, array_of(tr), s);
+                            }
+                        }
+                    }
+                    // obj.name = x: a local of another object (not a map key)
+                    "map_access" => {
+                        self.expr(l, s);
+                        let nc = named_children(&l);
+                        let tb = nc.first().and_then(|b| self.out.at.get(&b.id()).copied()).unwrap_or(ANY);
+                        if let (Some(key), true) = (nc.get(1), tb & OBJECT != 0) {
+                            let def = nc.first().and_then(|b| self.receiver_def(b));
+                            self.out.member_writes.entry(self.text(key).to_string()).or_default().push((def, tr));
+                        }
+                    }
+                    // LocalN("name"[, obj]) = x
+                    "method_call" => {
+                        self.expr(l, s);
+                        let name = l.child_by_field_name("name").map(|x| self.text(&x)).unwrap_or("");
+                        let args: Vec<Node> = l.child_by_field_name("args").map(|a| named_children(&a)).unwrap_or_default()
+                            .into_iter().filter(|c| c.kind() != "comment").collect();
+                        if let (true, Some(f)) = (name == "LocalN", args.first().filter(|f| f.kind() == "string")) {
+                            // the object: the second argument, else this object
+                            let def = match args.get(1) {
+                                Some(o) => self.receiver_def(o),
+                                None => self.info.def_id.clone(),
+                            };
+                            self.out.member_writes.entry(self.text(f).trim_matches('"').to_string()).or_default().push((def, tr));
+                        }
+                    }
+                    _ => {
+                        self.expr(l, s);
+                    }
                 }
-                self.assign(&l, tr, s);
                 tr
             }
             "+=" | "-=" | "*=" | "/=" | "%=" | "**=" | "<<=" | ">>=" | "&=" | "|=" | "^=" => {
@@ -583,11 +714,7 @@ impl<'a> Infer<'a> {
                 let (src, tree) = (&entry.0, &entry.1);
                 let root = tree.root_node();
                 let strict = super::diagnostics::strict_level(&root, src);
-                let func = named_children(&root).into_iter().find(|c| {
-                    matches!(c.kind(), "function_definition" | "old_function_definition")
-                        && c.child_by_field_name("name").map(|n| node_text(&n, src) == f.name && n.start_position().row as u32 == f.name_range.start.line).unwrap_or(false)
-                });
-                match func {
+                match find_func(&root, src, f) {
                     Some(func) => {
                         let r = infer_at_depth(self.index, file, src, func, strict, self.depth + 1).returns;
                         // a 0/false returned by a #strict 2 (or older) script arrives as nil in #strict 3
@@ -605,6 +732,140 @@ impl<'a> Infer<'a> {
             m.insert(key, t);
         }
         t
+    }
+}
+
+impl<'a> Infer<'a> {
+    /// Definition of the object an expression gives, when it shows: `this`, an ID, Create*/Find*/Place*(ID ...)
+    /// (also through Find_ID(ID)).
+    fn receiver_def(&self, n: &Node) -> Option<String> {
+        match n.kind() {
+            "identifier" if self.text(n) == "this" => self.info.def_id.clone(),
+            "id" => Some(self.text(n).to_string()),
+            "method_call" => {
+                let name = n.child_by_field_name("name").map(|x| self.text(&x)).unwrap_or("");
+                if !["Create", "Find", "Place", "Compose"].iter().any(|p| name.starts_with(p)) {
+                    return None;
+                }
+                let mut stack = n.child_by_field_name("args").map(|a| named_children(&a)).unwrap_or_default();
+                while let Some(c) = stack.pop() {
+                    if c.kind() == "id" && !self.text(&c).chars().all(|ch| ch.is_ascii_digit()) {
+                        return Some(self.text(&c).to_string());
+                    }
+                    if c.kind() == "method_call" && c.child_by_field_name("name").map(|x| self.text(&x) == "Find_ID").unwrap_or(false) {
+                        stack.extend(c.child_by_field_name("args").map(|a| named_children(&a)).unwrap_or_default());
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// The open document's fresh info replaces its index entry.
+    fn fresh<'b>(&'b self, f: &'b FileInfo) -> &'b FileInfo {
+        if path_key(&f.path) == path_key(&self.info.path) { self.info } else { f }
+    }
+
+    /// Analyse function number `i` of `file` (from disk, or the open document's text).
+    fn infer_other(&self, file: &FileInfo, i: usize) -> Option<FuncTypes> {
+        let f = file.funcs.get(i)?;
+        let current_key = path_key(&self.info.path);
+        let entry = parsed(&file.path, Some((&current_key, self.src)))?;
+        let (src, tree) = (&entry.0, &entry.1);
+        let root = tree.root_node();
+        let func = find_func(&root, src, f)?;
+        let strict = super::diagnostics::strict_level(&root, src);
+        Some(infer_at_depth(self.index, file, src, func, strict, self.depth + 1))
+    }
+
+    /// Type of the script variable `name` visible here: the union of all values assigned to it (cached).
+    fn field(&self, name: &str) -> Option<FieldType> {
+        if !super::diagnostics::field_types_enabled() {
+            return None;
+        }
+        let vars = self.index.visible_vars(self.info, name);
+        let (decl_file, var) = vars.first()?;
+        if var.kind == super::index::VarKind::StaticConst {
+            let ty = var.value.as_deref().map(literal_type).unwrap_or(ANY);
+            return Some(FieldType { ty, writers: 0, scripts: 0 });
+        }
+        if self.depth >= MAX_DEPTH {
+            return None;
+        }
+        let is_local = var.kind == super::index::VarKind::Local;
+        let key = if is_local { format!("local|{}|{}", path_key(&decl_file.path), name) } else { format!("static|{}", name) };
+        if let Some(t) = FIELDS.lock().ok().and_then(|m| m.get(&key).copied()) {
+            return Some(t);
+        }
+        {
+            let Ok(mut p) = IN_PROGRESS.lock() else { return None };
+            if !p.insert(key.clone()) {
+                // assigned from its own value (x = x .. [y]): the other assignments decide
+                return Some(FieldType { ty: NONE, writers: 0, scripts: 0 });
+            }
+        }
+        // the functions assigning it: a local from its definition's script family, a static from every script
+        // where the name means this static (not a local of its own)
+        let family_files: Vec<&FileInfo> = if is_local { self.index.family(self.fresh(decl_file)) } else { vec![] };
+        let family: Option<HashSet<String>> = is_local.then(|| {
+            family_files.iter().map(|f| path_key(&f.path)).chain(std::iter::once(path_key(&decl_file.path))).collect()
+        });
+        // obj.name = x counts unless obj is known to be of a definition outside the family
+        let family_ids: HashSet<&str> = family_files.iter().filter_map(|f| f.def_id.as_deref()).collect();
+        let mut ty = NONE;
+        let (mut writers, mut scripts) = (0, 0);
+        let current = path_key(&self.info.path);
+        let mut sites: Vec<(&FileInfo, usize, bool)> = vec![];
+        for (f, i, member) in self.index.writers(name) {
+            if path_key(&f.path) != current {
+                sites.push((f, i, member));
+            }
+        }
+        for (i, member) in self.info.writes.iter().filter(|(n, _, _)| n == name).map(|(_, i, m)| (*i, *m)) {
+            sites.push((self.info, i, member));
+        }
+        let mut seen_files = HashSet::new();
+        for (f, i, member) in sites {
+            let fk = path_key(&f.path);
+            if !member {
+                match &family {
+                    Some(fam) if !fam.contains(&fk) => continue,
+                    None => {
+                        let own = self.index.visible_vars(f, name);
+                        if own.first().map(|(_, v)| v.kind != super::index::VarKind::Static).unwrap_or(true) {
+                            continue;
+                        }
+                    }
+                    _ => {}
+                }
+            } else if !is_local {
+                continue;
+            }
+            let Some(ft) = self.infer_other(f, i) else { continue };
+            let t = if member {
+                ft.member_writes.get(name).into_iter().flatten()
+                    .filter(|(def, _)| def.as_deref().map_or(true, |d| family_ids.contains(d)))
+                    .fold(None, |acc: Option<Ty>, (_, t)| Some(acc.unwrap_or(NONE) | *t))
+            } else {
+                ft.writes.get(name).copied()
+            };
+            if let Some(t) = t {
+                ty |= t;
+                writers += 1;
+                if seen_files.insert(fk) {
+                    scripts += 1;
+                }
+            }
+        }
+        if let Ok(mut p) = IN_PROGRESS.lock() {
+            p.remove(&key);
+        }
+        let r = FieldType { ty: if writers == 0 { NIL } else { ty }, writers, scripts };
+        if let Ok(mut m) = FIELDS.lock() {
+            m.insert(key, r);
+        }
+        Some(r)
     }
 }
 
@@ -629,11 +890,44 @@ pub fn type_at(index: &Index, info: &FileInfo, src: &str, root: &Node, node: &No
 }
 
 fn concat(tl: Ty, tr: Ty) -> Ty {
-    if tl == ARRAY && tr == ARRAY {
-        ARRAY
+    let array_or_none = |t: Ty| t == NONE || kinds(t) == ARRAY;
+    if array_or_none(tl) && array_or_none(tr) && (tl | tr) != NONE {
+        tl | tr // both arrays: the elements of both
     } else if (tl | tr) & ARRAY != 0 {
-        ARRAY | STRING
+        ARRAY_ANY | STRING
     } else {
         STRING
     }
+}
+
+/// Type of a `static const` from its value's text.
+fn literal_type(v: &str) -> Ty {
+    let v = v.trim();
+    if v.starts_with('"') {
+        STRING
+    } else if v == "true" || v == "false" {
+        BOOL
+    } else if v == "nil" {
+        NIL
+    } else if v.trim_start_matches('-').chars().all(|c| c.is_ascii_digit()) && !v.is_empty() {
+        INT
+    } else if v.len() == 4 && v.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_') {
+        ID
+    } else {
+        ANY
+    }
+}
+
+/// The function node of `f` in a parsed script.
+fn find_func<'t>(root: &Node<'t>, src: &str, f: &FuncDef) -> Option<Node<'t>> {
+    named_children(root).into_iter().find(|c| {
+        matches!(c.kind(), "function_definition" | "old_function_definition")
+            && c.child_by_field_name("name").map(|n| node_text(&n, src) == f.name && n.start_position().row as u32 == f.name_range.start.line).unwrap_or(false)
+    })
+}
+
+/// Inferred type of the script variable `name` as seen from `info` (None: not a script variable, or switched off).
+pub fn field_type(index: &Index, info: &FileInfo, src: &str, name: &str) -> Option<FieldType> {
+    let inf = Infer { index, info, src, strict: 3, in_global: false, depth: 0, locals: HashSet::new(), loops: vec![], out: FuncTypes::default() };
+    inf.field(name)
 }

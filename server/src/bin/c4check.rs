@@ -1,6 +1,6 @@
 //! Command-line checker: index the roots and print diagnostics for C4Script files.
 //!
-//! Usage: c4check [--root DIR]... [--game-dir DIR] [--all-packs] [--no-type-checks] [--languages DE,US] [--errors-only] [PATH]...
+//! Usage: c4check [--root DIR]... [--game-dir DIR] [--all-packs] [--no-type-checks] [--no-field-types] [--languages DE,US] [--errors-only] [PATH]...
 //!   --root DIR     folder to index (repeatable; default: current directory)
 //!   --game-dir DIR game folder (default: env C4LS_GAME_DIR): its Objects.c4d and the packs the scenarios
 //!                  name in [Definitions] are indexed too (packed groups are unpacked once into a cache)
@@ -28,8 +28,9 @@ fn main() {
             "--languages" => legacy_clonk_ls::analysis::strings::set_languages(
                 args.next().expect("--languages needs a list like DE,US").split(',').map(|s| s.to_string()).collect()),
             "--no-type-checks" => legacy_clonk_ls::analysis::diagnostics::TYPE_CHECKS.store(false, std::sync::atomic::Ordering::Relaxed),
+            "--no-field-types" => legacy_clonk_ls::analysis::diagnostics::FIELD_TYPES.store(false, std::sync::atomic::Ordering::Relaxed),
             "-h" | "--help" => {
-                eprintln!("usage: c4check [--root DIR]... [--game-dir DIR] [--all-packs] [--no-type-checks] [--languages DE,US] [--errors-only] [PATH]...");
+                eprintln!("usage: c4check [--root DIR]... [--game-dir DIR] [--all-packs] [--no-type-checks] [--no-field-types] [--languages DE,US] [--errors-only] [PATH]...");
                 return;
             }
             _ => targets.push(PathBuf::from(a)),

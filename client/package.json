@@ -89,6 +89,11 @@
 					"type": "boolean",
 					"default": true,
 					"description": "Report arguments whose type the engine can never convert (e.g. an object passed where a string is expected); they fail at runtime. Turn off if it reports false positives."
+				},
+				"legacy-clonk-ext.fieldTypes": {
+					"type": "boolean",
+					"default": true,
+					"description": "Infer the types of script variables (local, static) from every value the indexed scripts assign to them (a local from its definition's scripts and obj.name = x writes, a static from all scripts). Shown on hover and used by the type checks. Needs typeChecks."
 				}
 			}
 		},
