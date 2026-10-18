@@ -91,6 +91,57 @@ pub struct FileInfo {
     /// functions the ActMap.txt / DefCore.txt next to the script calls: (function, key like "PhaseCall", the
     /// action's Procedure or "" for DefCore)
     pub ini_calls: Vec<(String, String, String)>,
+    /// names read somewhere in the script (identifiers that aren't declarations, plain `x =` targets, function or
+    /// parameter names; LocalN("x") strings), and whether it uses Local(n) (locals by index): lint unused-local
+    pub read_idents: HashSet<String>,
+    pub locals_by_index: bool,
+}
+
+/// FileInfo::read_idents / locals_by_index.
+fn collect_reads(root: &Node, src: &str, info: &mut FileInfo) {
+    let mut stack = vec![*root];
+    while let Some(n) = stack.pop() {
+        match n.kind() {
+            // declarations: the name isn't a read, the initial value is
+            "var_assignment" => {
+                stack.extend(named_children(&n).into_iter().skip(1));
+                continue;
+            }
+            "param" | "function_definition" | "old_function_definition" => {
+                if n.kind() != "param" {
+                    stack.extend(named_children(&n).into_iter().filter(|c| c.kind() != "identifier" || n.child_by_field_name("name").map(|x| x.id() != c.id()).unwrap_or(true)));
+                }
+                continue;
+            }
+            "binary_expression" if children(&n).iter().any(|c| c.kind() == "=") => {
+                let nc: Vec<Node> = named_children(&n).into_iter().filter(|c| c.kind() != "comment").collect();
+                if nc.first().map(|l| l.kind() == "identifier").unwrap_or(false) {
+                    stack.extend(nc.into_iter().skip(1));
+                    continue;
+                }
+            }
+            "method_call" => {
+                let name = n.child_by_field_name("name").map(|x| node_text(&x, src)).unwrap_or("");
+                // Local(n) reads locals by index, eval("...") may name any of them
+                if name == "Local" || name == "eval" {
+                    info.locals_by_index = true;
+                }
+                if name == "LocalN" {
+                    if let Some(s) = n.child_by_field_name("args").and_then(|a| named_children(&a).into_iter().find(|c| c.kind() == "string")) {
+                        info.read_idents.insert(node_text(&s, src).trim_matches('"').to_string());
+                    }
+                }
+                // the called name isn't a variable read; the receiver and arguments are
+                stack.extend(named_children(&n).into_iter().filter(|c| n.child_by_field_name("name").map(|x| x.id() != c.id()).unwrap_or(true)));
+                continue;
+            }
+            "identifier" => {
+                info.read_idents.insert(node_text(&n, src).to_string());
+            }
+            _ => {}
+        }
+        stack.extend(named_children(&n));
+    }
 }
 
 /// Whether a string is a call by name on the script's own object (see FileInfo::own_string_words).
@@ -236,6 +287,8 @@ struct Lookup {
     string_prefixes: HashSet<String>,
     /// function -> its ActMap/DefCore uses (key, procedure)
     ini_calls: HashMap<String, Vec<(String, String, String)>>,
+    /// name -> number of scripts reading it (FileInfo::read_idents, also their string words)
+    read_counts: HashMap<String, u32>,
     /// (function, argument position) of reference parameters (script &x, engine C4Value *)
     ref_params: HashSet<(String, usize)>,
     /// lowercase names of the .c4d/.c4f folders that indexed scripts lie in (which packs are indexed)
@@ -291,6 +344,9 @@ impl Lookup {
             }
             l.string_words.extend(f.string_words.iter().cloned());
             l.string_prefixes.extend(f.string_prefixes.iter().cloned());
+            for n in f.read_idents.iter().chain(f.string_words.iter()).chain(f.own_string_words.iter()).collect::<HashSet<_>>() {
+                *l.read_counts.entry(n.clone()).or_insert(0) += 1;
+            }
             for (func, k, p) in &f.ini_calls {
                 l.ini_calls.entry(func.clone()).or_default().push((key.clone(), k.clone(), p.clone()));
             }
@@ -538,6 +594,8 @@ pub fn extract(path: &Path, src: &str, tree: &Tree) -> FileInfo {
         string_prefixes: HashSet::new(),
         own_string_words: HashSet::new(),
         ini_calls: vec![],
+        read_idents: HashSet::new(),
+        locals_by_index: false,
         id_refs: vec![],
         writes: vec![],
         ref_args: vec![],
@@ -545,6 +603,7 @@ pub fn extract(path: &Path, src: &str, tree: &Tree) -> FileInfo {
     if let Some(dir) = path.parent() {
         info.ini_calls = ini_calls(dir);
     }
+    collect_reads(&tree.root_node(), src, &mut info);
     let mut stack = vec![tree.root_node()];
     while let Some(n) = stack.pop() {
         match n.kind() {
@@ -1099,6 +1158,11 @@ impl Index {
         if l.string_words.contains(name) || l.string_prefixes.iter().any(|p| p.len() >= 3 && name.starts_with(p.as_str())) {
             return true;
         }
+        // Fire1, Fire2: the name may be built from "Fire" and a number at runtime
+        let base = name.trim_end_matches(|c: char| c.is_ascii_digit());
+        if base.len() >= 3 && base.len() < name.len() && (l.string_words.contains(base) || l.read_counts.contains_key(base)) {
+            return true;
+        }
         if file.own_string_words.contains(name) {
             return true;
         }
@@ -1106,6 +1170,11 @@ impl Index {
             Some(fam) => fam.iter().any(|f| f.own_string_words.contains(name)),
             None => self.family(file).iter().any(|f| f.own_string_words.contains(name)),
         }
+    }
+
+    /// How many indexed scripts read a variable named `name` (or name it in a LocalN / may-run string).
+    pub fn read_count(&self, name: &str) -> u32 {
+        self.lookup().read_counts.get(name).copied().unwrap_or(0)
     }
 
     /// How ActMap/DefCore files call a function: (script next to the file, key like "PhaseCall", procedure).

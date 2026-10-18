@@ -170,6 +170,41 @@ fn check_function_vars(func: &Node, src: &str, li: &LineIndex, out: &mut Vec<Dia
     }
 }
 
+/// unused-local: a `local`/`static` (not const) that no indexed script reads (obj.x, LocalN("x") and strings that
+/// may run code count as reads; any variable of that name in any script counts, so this is conservative). Skipped
+/// when the definition family uses Local(n) (locals by index) or the name starts with '_'.
+pub fn unused_script_vars(index: &Index, info: &FileInfo, out: &mut Vec<Diagnostic>) {
+    let current = path_key(&info.path);
+    let mut family: Option<Vec<&FileInfo>> = None;
+    for v in &info.vars {
+        if !matches!(v.kind, super::index::VarKind::Local | super::index::VarKind::Static) || v.name.starts_with('_') {
+            continue;
+        }
+        if info.read_idents.contains(&v.name) || info.string_words.contains(&v.name) || info.own_string_words.contains(&v.name) {
+            continue;
+        }
+        // the index entry of this script may be stale (the open document): count the other scripts only
+        let own = index.files.get(&current).map(|f| f.read_idents.contains(&v.name) || f.string_words.contains(&v.name) || f.own_string_words.contains(&v.name)).unwrap_or(false);
+        if index.read_count(&v.name) > own as u32 {
+            continue;
+        }
+        // createType1, createType2: the name may be built from "createType" and a number at runtime
+        let base = v.name.trim_end_matches(|c: char| c.is_ascii_digit());
+        if base.len() < v.name.len() && (index.read_count(base) > 0 || info.read_idents.contains(base) || info.string_words.contains(base)) {
+            continue;
+        }
+        if v.kind == super::index::VarKind::Local {
+            let fam = family.get_or_insert_with(|| index.family(info));
+            if info.locals_by_index || fam.iter().any(|f| f.locals_by_index) {
+                continue;
+            }
+        }
+        let what = if v.kind == super::index::VarKind::Local { "local" } else { "static" };
+        out.push(diag(v.range, DiagnosticSeverity::WARNING, "unused-local",
+            format!("{} \"{}\" is never read by any script (remove it, or name it _{} to keep it)", what, v.name, v.name)));
+    }
+}
+
 /// Whether a statement always leaves the code after it: return, break/continue, a block ending in one, an if/else
 /// whose branches both leave.
 fn exits(s: &Node) -> bool {

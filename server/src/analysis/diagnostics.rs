@@ -48,6 +48,7 @@ pub fn diagnose(index: &Index, info: &FileInfo, src: &str, tree: &Tree) -> Vec<D
         super::lint::unused_vars(&root, src, &li, &mut out);
         super::lint::unreachable(&root, &li, &mut out);
         super::lint::unused_funcs(index, info, &mut out);
+        super::lint::unused_script_vars(index, info, &mut out);
     }
     // The engine doesn't report errors in System.c4g scripts that are pure #appendto scripts (C4AulParse Warn/
     // ParseFn: "do not show errors for System.c4g scripts that appear to be pure #appendto scripts"), but the
@@ -193,6 +194,7 @@ impl<'a> Ctx<'a> {
             }
             "nil" if self.strict < 3 => self.strict_error(&n, "unknown identifier: nil (nil is a keyword only in #strict 3)"),
             "method_call" => self.check_call(&n),
+            "binary_expression" | "unary_expression" => self.check_operator(&n),
             "identifier" => self.check_identifier(&n),
             "id" => self.check_id(&n),
             // #include/#appendto: only the target ID matters (it may not be loaded by this scenario)
@@ -494,6 +496,57 @@ impl<'a> Ctx<'a> {
         self.out.push(diag(self.li.node_range(&target), DiagnosticSeverity::WARNING, "nil-call",
             format!("{} may be nil here ({}() can return nil): nil->{}() stops the script (\"Object call: target is zero!\", also with ->~); {}",
                 if target.kind() == "identifier" { format!("\"{}\"", what) } else { "the result".to_string() }, source, name, fix)));
+    }
+
+    /// op-type: an operand the engine can't use (C4AulExec CheckOpPars): arithmetic, bit and comparison operators,
+    /// ++/-- and compound assignments want ints; in #strict 3 nil is an error there ("got nil, but expected int"),
+    /// below it nil counts as 0. Only certain types (types.rs) are reported: nil alone, or members that never
+    /// convert to int and can't be "nothing".
+    fn check_operator(&mut self, n: &Node) {
+        use super::types::*;
+        if !type_checks_enabled() {
+            return;
+        }
+        let Some(types) = self.types.as_ref() else { return };
+        let op = super::index::children(n).iter().find(|c| !c.is_named() && !matches!(c.kind(), "(" | ")")).map(|c| c.kind().to_string()).unwrap_or_default();
+        let operands: Vec<Node> = named_children(n).into_iter().filter(|c| c.kind() != "comment").collect();
+        // (operand, side) pairs the engine checks
+        let checked: Vec<(Node, &str)> = match (n.kind(), op.as_str()) {
+            ("binary_expression", "+" | "-" | "*" | "/" | "%" | "**" | "<<" | ">>" | "&" | "|" | "^" | "<" | ">" | "<=" | ">=") =>
+                operands.iter().zip([" left side", " right side"]).map(|(o, s)| (*o, s)).collect(),
+            ("binary_expression", "+=" | "-=" | "*=" | "/=" | "%=" | "**=" | "<<=" | ">>=" | "&=" | "|=" | "^=") =>
+                operands.iter().zip([" left side", " right side"]).map(|(o, s)| (*o, s)).collect(),
+            ("binary_expression", "..=") => operands.first().map(|o| vec![(*o, " left side")]).unwrap_or_default(),
+            ("unary_expression", "-" | "~" | "++" | "--") => operands.first().map(|o| vec![(*o, "")]).unwrap_or_default(),
+            _ => return,
+        };
+        let int_wanted = op != "..=";
+        for (o, side) in checked {
+            let Some(t) = types.read_at.get(&o.id()).or_else(|| types.at.get(&o.id())).copied() else { continue };
+            if t == NONE || t == ANY {
+                continue;
+            }
+            let got = if t == NIL {
+                if self.strict < 3 {
+                    continue; // nil counts as 0 below #strict 3
+                }
+                "nil".to_string()
+            } else {
+                if !int_wanted {
+                    continue;
+                }
+                let maybe_falsy = if self.strict >= 3 { NIL } else { NIL | INT | BOOL | ID | STRING };
+                if t & maybe_falsy != 0 || !members(t).iter().all(|m| never_converts(m, "int")) {
+                    continue;
+                }
+                display(kinds(t))
+            };
+            let shown = if got == "nil" { "nil".to_string() } else { format!("\"{}\"", got) };
+            let hint = if got == "nil" { " (an uninitialized var/local is nil: initialize it, e.g. var x = 0;)" } else { "" };
+            self.out.push(diag(self.li.node_range(&o), DiagnosticSeverity::ERROR, "op-type",
+                format!("operator \"{}\"{}: got {}, but expected \"int\": fails at runtime{}", op, side, shown, hint)));
+            break; // the engine stops at the first operand
+        }
     }
 
     /// The type of an argument when it is certain, and whether the value can never be falsy.

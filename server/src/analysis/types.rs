@@ -185,6 +185,8 @@ pub struct FuncTypes {
     /// direct calls (F() / this->F()): the call facts holding there that also make sense in the callee (no
     /// variables in them), for callers.rs
     pub site_facts: HashMap<usize, Vec<String>>,
+    /// x += 1, x++, x ..= y: the type x had before (`at` holds the new one), for diagnostics' op-type
+    pub read_at: HashMap<usize, Ty>,
     /// per parameter: for a reference parameter (&x) the type it holds when the function ends (union over the
     /// exits that assigned it) and whether some exit leaves the caller's value untouched; others (NONE, false)
     pub ref_out: Vec<(Ty, bool)>,
@@ -741,8 +743,9 @@ impl<'a> Infer<'a> {
                 let op = self.op(&n);
                 let operand = named_children(&n).into_iter().find(|c| c.kind() != "comment");
                 if let Some(o) = operand {
-                    self.expr(o, s);
+                    let t = self.expr(o, s);
                     if op == "++" || op == "--" {
+                        self.out.read_at.insert(o.id(), t);
                         self.assign(&o, INT, s);
                     }
                 }
@@ -896,13 +899,15 @@ impl<'a> Infer<'a> {
                 tr
             }
             "+=" | "-=" | "*=" | "/=" | "%=" | "**=" | "<<=" | ">>=" | "&=" | "|=" | "^=" => {
-                self.expr(l, s);
+                let tl = self.expr(l, s);
+                self.out.read_at.insert(l.id(), tl);
                 self.expr(r, s);
                 self.assign(&l, INT, s);
                 INT
             }
             "..=" => {
                 let tl = self.expr(l, s);
+                self.out.read_at.insert(l.id(), tl);
                 let tr = self.expr(r, s);
                 let t = concat(tl, tr);
                 self.assign(&l, t, s);
