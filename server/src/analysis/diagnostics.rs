@@ -41,6 +41,7 @@ pub fn diagnose(index: &Index, info: &FileInfo, src: &str, tree: &Tree) -> Vec<D
     let mut ctx = Ctx { index, info, src, li: &li, out: &mut out, locals: HashSet::new(), strict, func: None,
         func_start: (0, 0), in_global: false, id_label_error: false, unresolved_scope, types: None };
     ctx.walk(tree.root_node());
+    check_string_table(info, src, &li, &mut out);
     // The engine doesn't report errors in System.c4g scripts that are pure #appendto scripts (C4AulParse Warn/
     // ParseFn: "do not show errors for System.c4g scripts that appear to be pure #appendto scripts"), but the
     // broken function still isn't compiled: report them as warnings.
@@ -51,6 +52,31 @@ pub fn diagnose(index: &Index, info: &FileInfo, src: &str, tree: &Tree) -> Vec<D
         }
     }
     out
+}
+
+/// `$Name$` references: the engine warns "string table entry not found" when the table (StringTbl.txt /
+/// StringTbl<Language>.txt next to the script) has no such entry; missing in only some languages: info.
+fn check_string_table(info: &FileInfo, src: &str, li: &LineIndex, out: &mut Vec<Diagnostic>) {
+    let refs = super::strings::refs(src);
+    if refs.is_empty() {
+        return;
+    }
+    let tables = super::strings::tables_for(&info.path);
+    for (name, start, end) in refs {
+        let range = tower_lsp::lsp_types::Range::new(li.byte_to_lsp(start), li.byte_to_lsp(end));
+        let missing: Vec<String> = tables.iter().filter(|t| !t.entries.contains_key(&name))
+            .map(|t| t.path.file_name().unwrap_or_default().to_string_lossy().to_string()).collect();
+        if tables.is_empty() {
+            out.push(diag(range, DiagnosticSeverity::WARNING, "string-table",
+                format!("string table entry not found: \"{}\" (no StringTbl*.txt next to this script)", name)));
+        } else if missing.len() == tables.len() {
+            out.push(diag(range, DiagnosticSeverity::WARNING, "string-table",
+                format!("string table entry not found: \"{}\" (not in {})", name, missing.join(", "))));
+        } else if !missing.is_empty() {
+            out.push(diag(range, DiagnosticSeverity::INFORMATION, "string-table",
+                format!("${}$ is missing in {}: players with that language get a warning and the raw text", name, missing.join(", "))));
+        }
+    }
 }
 
 /// 0 = no #strict, 1 = #strict, 2 = #strict 2, 3 = #strict 3 (C4AulScriptStrict)

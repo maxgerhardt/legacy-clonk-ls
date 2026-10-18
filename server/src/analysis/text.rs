@@ -65,6 +65,21 @@ impl<'a> LineIndex<'a> {
         Point { row: pos.line as usize, column: col }
     }
 
+    /// LSP position of a byte offset of the source.
+    pub fn byte_to_lsp(&self, b: usize) -> Position {
+        let row = match self.starts.binary_search(&b) {
+            Ok(r) => r,
+            Err(r) => r - 1,
+        };
+        self.to_lsp(Point { row, column: b - self.starts[row] })
+    }
+
+    /// Byte offset of an LSP position.
+    pub fn to_byte(&self, pos: Position) -> usize {
+        let p = self.to_point(pos);
+        self.starts.get(p.row).map(|s| s + p.column).unwrap_or(self.src.len())
+    }
+
     pub fn node_range(&self, n: &Node) -> Range {
         Range::new(self.to_lsp(n.start_position()), self.to_lsp(n.end_position()))
     }

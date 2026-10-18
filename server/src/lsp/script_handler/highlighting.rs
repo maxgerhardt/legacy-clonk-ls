@@ -1,6 +1,6 @@
 use tower_lsp::lsp_types::SemanticToken; use tree_sitter::{Tree, TreeCursor, Node};
 use std::collections::HashSet;
-use crate::lsp::{highlight_helper::{add_semantic_token, Context}, token_types::TokenTypes};
+use crate::lsp::{highlight_helper::{add_semantic_token, add_semantic_token_at, Context}, token_types::TokenTypes};
 
 pub struct Highlighter;
 
@@ -137,11 +137,34 @@ impl Highlighter {
                         }
                     },
                     "string" => {
-                        Self::add_token(
-                            ctx,
-                            ctx.token_types.string,
-                            &node,
-                        );
+                        // $Name$ inside a string: string table reference in the macro color (single-line strings)
+                        let refs = if src.text.is_empty() || node.start_position().row != node.end_position().row {
+                            vec![]
+                        } else {
+                            crate::analysis::strings::refs(&src.text[node.start_byte()..node.end_byte()])
+                        };
+                        if refs.is_empty() {
+                            Self::add_token(ctx, ctx.token_types.string, &node);
+                        } else {
+                            let row = node.start_position().row;
+                            let col0 = node.start_position().column;
+                            let len = node.end_byte() - node.start_byte();
+                            let at = |c: usize| tree_sitter::Point { row, column: col0 + c };
+                            let mut pos = 0;
+                            for (_, s, e) in refs {
+                                if s > pos {
+                                    add_semantic_token_at(ctx, ctx.token_types.string, at(pos), at(s));
+                                }
+                                add_semantic_token_at(ctx, ctx.token_types.pragma_strict, at(s), at(e));
+                                pos = e;
+                            }
+                            if pos < len {
+                                add_semantic_token_at(ctx, ctx.token_types.string, at(pos), at(len));
+                            }
+                        }
+                    },
+                    "translation" => {
+                        Self::add_token(ctx, ctx.token_types.pragma_strict, &node);
                     },
                     "pragma_strict" => {
                         Self::add_token(
@@ -188,10 +211,11 @@ impl Highlighter {
                             &node,
                         );
                     },
+                    // nil is a constant value like true/false: their color
                     "nil" => {
                         Self::add_token(
                             ctx,
-                            ctx.token_types.nil,
+                            ctx.token_types.bool,
                             &node,
                         );
                     },
@@ -402,6 +426,19 @@ mod tests {
         // for (var i ...): var_scope; for (var x in a): var + in as keywords (besides func/for/for)
         assert_eq!(tokens.iter().filter(|t| t.token_type == 31).count(), 1, "var in for (var i = 0; ...)");
         assert_eq!(tokens.iter().filter(|t| t.token_type == 30).count(), 5, "func, for, for, var, in");
+    }
+
+    #[test]
+    fn colors_string_table_refs_and_nil() {
+        let mut parser = Parser::new();
+        parser.set_language(tree_sitter_c4script::language()).expect("Loading c4scrpt grammar");
+        let src = "#strict 3\nfunc f() { Message(\"say $TxtHello$ now\"); return nil; }";
+        let tree = parser.parse(src, None).unwrap();
+        let lut = TokenTypes { string: 40, pragma_strict: 41, bool: 42, ..TokenTypes::default() };
+        let tokens = Highlighter::collect_tokens_with_source(&tree, lut, src);
+        assert_eq!(tokens.iter().filter(|t| t.token_type == 40).count(), 2, "string before and after");
+        assert_eq!(tokens.iter().filter(|t| t.token_type == 41 && t.length == 10).count(), 1, "$TxtHello$");
+        assert_eq!(tokens.iter().filter(|t| t.token_type == 42).count(), 1, "nil like true/false");
     }
 
     #[test]

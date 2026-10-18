@@ -80,6 +80,9 @@ fn call_targets<'a>(index: &'a Index, info: &'a FileInfo, name: &str, arrow: boo
 
 pub fn hover(index: &Index, info: &FileInfo, tree: &Tree, src: &str, pos: Position) -> Option<String> {
     let li = LineIndex::new(src);
+    if let Some((name, _, _)) = super::strings::ref_at(src, li.to_byte(pos)) {
+        return Some(super::strings::hover(&info.path, &name));
+    }
     match target_at(tree, src, &li, pos)? {
         Target::Call { name, arrow, node } => {
             let defs = call_targets(index, info, &name, arrow);
@@ -182,6 +185,12 @@ standard definition from `{}`", id, std.name, std.tlc));
 
 pub fn definition(index: &Index, info: &FileInfo, tree: &Tree, src: &str, pos: Position) -> Vec<Location> {
     let li = LineIndex::new(src);
+    // $Name$: the entry in every string table
+    if let Some((name, _, _)) = super::strings::ref_at(src, li.to_byte(pos)) {
+        return super::strings::tables_for(&info.path).iter()
+            .filter_map(|t| t.entries.get(&name).and_then(|(_, line)| loc(&t.path, Range::new(Position::new(*line, 0), Position::new(*line, name.len() as u32)))))
+            .collect();
+    }
     let target = match target_at(tree, src, &li, pos) {
         Some(t) => t,
         None => return vec![],

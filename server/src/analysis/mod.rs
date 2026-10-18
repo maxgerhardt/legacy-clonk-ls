@@ -4,5 +4,6 @@ pub mod diagnostics;
 pub mod engine;
 pub mod index;
 pub mod query;
+pub mod strings;
 pub mod text;
 pub mod types;
