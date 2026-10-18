@@ -25,6 +25,7 @@ impl OwnSemanticTokenType {
     const CONTROL: SemanticTokenType = SemanticTokenType::new("controlKeyword");
     const PLACEHOLDER: SemanticTokenType = SemanticTokenType::new("formatPlaceholder");
     const ESCAPE: SemanticTokenType = SemanticTokenType::new("stringEscape");
+    const TRANSLATION: SemanticTokenType = SemanticTokenType::new("translation");
 }
 const NEGOTIATE_TOKENT_TYPES: bool = false;
 const LOG_TREE_UPDATE_POSITIONS: bool = false;
@@ -79,6 +80,7 @@ impl Backend {
             control_kw: 4,
             placeholder: 1,
             escape: 1,
+            translation: 3,
         };
         negotiated.push(SemanticTokenType::ENUM_MEMBER); // index 8: engine constants, static consts
         negotiated.push(SemanticTokenType::VARIABLE); // 9: function-local variables
@@ -121,6 +123,8 @@ impl Backend {
             negotiated.push(OwnSemanticTokenType::PLACEHOLDER);
             lut.escape = (negotiated.len()) as u32;
             negotiated.push(OwnSemanticTokenType::ESCAPE);
+            lut.translation = (negotiated.len()) as u32;
+            negotiated.push(OwnSemanticTokenType::TRANSLATION);
         }
 
         let legend = SemanticTokensLegend {

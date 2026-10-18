@@ -25,6 +25,16 @@
 	"contributes": {
 		"themes": [
 			{
+				"label": "C4Script Dark (C#)",
+				"uiTheme": "vs-dark",
+				"path": "./themes/c4script-csharp-dark-color-theme.json"
+			},
+			{
+				"label": "C4Script Dark (C++)",
+				"uiTheme": "vs-dark",
+				"path": "./themes/c4script-cpp-dark-color-theme.json"
+			},
+			{
 				"label": "C4Scripter Classic",
 				"uiTheme": "vs",
 				"path": "./themes/c4scripter-color-theme.json"
@@ -186,6 +196,9 @@
 					],
 					"stringEscape": [
 						"constant.character.escape"
+					],
+					"translation": [
+						"entity.name.function.preprocessor"
 					]
 				}
 			},
@@ -237,6 +250,11 @@
 				"description": "Escape sequences in strings",
 				"id": "stringEscape",
 				"superType": "string"
+			},
+			{
+				"description": "String table references $Name$ (replaced by StringTbl<Language>.txt entries)",
+				"id": "translation",
+				"superType": "macro"
 			}
 		]
 	},

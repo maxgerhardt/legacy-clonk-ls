@@ -8,3 +8,4 @@
 !themes/
 !c4script-language-configuration.json
 !c4ini-language-configuration.json
+themes/*.py

@@ -183,7 +183,7 @@ impl Highlighter {
                         }
                     },
                     "translation" => {
-                        Self::add_token(ctx, ctx.token_types.pragma_strict, &node);
+                        Self::add_token(ctx, ctx.token_types.translation, &node);
                     },
                     "pragma_strict" => {
                         Self::add_token(
@@ -368,7 +368,7 @@ const FORMAT_FUNCS: [(&str, usize); 7] =
 /// Sub-ranges of a string node (byte offsets relative to the node) with their token type, sorted.
 fn string_pieces(node: &Node, src: &str, tt: &TokenTypes) -> Vec<(usize, usize, u32)> {
     let text = &src[node.start_byte()..node.end_byte()];
-    let mut out: Vec<(usize, usize, u32)> = crate::analysis::strings::refs(text).into_iter().map(|(_, s, e)| (s, e, tt.pragma_strict)).collect();
+    let mut out: Vec<(usize, usize, u32)> = crate::analysis::strings::refs(text).into_iter().map(|(_, s, e)| (s, e, tt.translation)).collect();
     let b = text.as_bytes();
     // escapes the engine knows: \" and \\ (C4AulParse)
     let mut i = 1;
@@ -616,7 +616,7 @@ mod tests {
         parser.set_language(tree_sitter_c4script::language()).expect("Loading c4scrpt grammar");
         let src = "#strict 3\nfunc f() { Message(\"say $TxtHello$ now\"); return nil; }";
         let tree = parser.parse(src, None).unwrap();
-        let lut = TokenTypes { string: 40, pragma_strict: 41, bool: 42, ..TokenTypes::default() };
+        let lut = TokenTypes { string: 40, translation: 41, bool: 42, ..TokenTypes::default() };
         let tokens = Highlighter::collect_tokens_with_source(&tree, lut, src);
         assert_eq!(tokens.iter().filter(|t| t.token_type == 40).count(), 2, "string before and after");
         assert_eq!(tokens.iter().filter(|t| t.token_type == 41 && t.length == 10).count(), 1, "$TxtHello$");

@@ -96,6 +96,7 @@
     "variable": "#000000",
     "property": "#000000",
     "enumMember": "#000000",
-    "id": "#000000"
+    "id": "#000000",
+    "translation": "#0000FF"
   }
 }

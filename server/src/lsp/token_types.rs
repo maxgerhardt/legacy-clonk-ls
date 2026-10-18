@@ -28,4 +28,6 @@ pub struct TokenTypes {
     pub placeholder: u32,
     /// \" and \\ in strings: stringEscape (constant.character.escape)
     pub escape: u32,
+    /// $Name$ string table references: translation (superType macro)
+    pub translation: u32,
 }
