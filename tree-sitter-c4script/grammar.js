@@ -268,7 +268,9 @@ module.exports = grammar({
 
         method_call: $ => seq(
             optional(seq(field('id', $.id), '::')),
-            field('name', $.identifier),
+            // a name that looks like an ID (ABCD()) is lexed as an id; the engine accepts it below #strict 2
+            // ("stupid func label" warning), so parse it as the call's name
+            field('name', choice($.identifier, alias($.id, $.identifier))),
             field('args', $.args_list),
         ),
 

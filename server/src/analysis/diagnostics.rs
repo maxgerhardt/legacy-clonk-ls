@@ -4,6 +4,9 @@
 //! - "<Func>: passing N parameters, but only M are used" (an engine warning)
 //! - definition IDs that no indexed DefCore.txt defines
 //! - constructs that the script's #strict level doesn't allow (none / #strict / #strict 2 / #strict 3)
+//! - global funcs: they run in the engine's context, so direct calls only reach global and engine functions and
+//!   `local` variables are an error (C4AulParse: `Fn->Owner == &Game.ScriptEngine`)
+//! - "stupid func label": a name that looks like an ID (4 chars A-Z 0-9 _) right before '(' or ':' (tokenizer)
 
 use super::engine::{ENGINE, KEYWORDS};
 use super::index::{named_children, FileInfo, Index};
@@ -36,7 +39,7 @@ pub fn diagnose(index: &Index, info: &FileInfo, src: &str, tree: &Tree) -> Vec<D
     }
     let unresolved_scope = index.has_unresolved_targets(info);
     let mut ctx = Ctx { index, info, src, li: &li, out: &mut out, locals: HashSet::new(), strict, func: None,
-        func_start: (0, 0), unresolved_scope };
+        func_start: (0, 0), in_global: false, id_label_error: false, unresolved_scope };
     ctx.walk(tree.root_node());
     // The engine doesn't report errors in System.c4g scripts that are pure #appendto scripts (C4AulParse Warn/
     // ParseFn: "do not show errors for System.c4g scripts that appear to be pure #appendto scripts"), but the
@@ -94,6 +97,10 @@ struct Ctx<'a> {
     func: Option<String>,
     /// start (row, column) of the function being walked
     func_start: (usize, usize),
+    /// the function being walked is a `global func`
+    in_global: bool,
+    /// a "stupid func label" error was reported: the engine aborts the script there, so only the first one counts
+    id_label_error: bool,
     /// an #include/#appendto target of this script isn't indexed: its functions/locals are unknown
     unresolved_scope: bool,
 }
@@ -112,11 +119,16 @@ impl<'a> Ctx<'a> {
                 self.locals = function_locals(&n, self.src);
                 self.func = n.child_by_field_name("name").map(|x| node_text(&x, self.src).to_string());
                 self.func_start = (n.start_position().row, n.start_position().column);
+                self.in_global = n.child_by_field_name("visibility").map(|v| node_text(&v, self.src) == "global").unwrap_or(false);
+                if let Some(name) = n.child_by_field_name("name") {
+                    self.check_id_label(&name);
+                }
                 for c in named_children(&n) {
                     self.walk(c);
                 }
                 self.locals.clear();
                 self.func = None;
+                self.in_global = false;
                 return;
             }
             "array" if self.strict == 0 => self.strict_error(&n, "unexpected '[' (array literals need #strict)"),
@@ -154,6 +166,7 @@ impl<'a> Ctx<'a> {
             None => return,
         };
         let name = node_text(&name_node, self.src);
+        self.check_id_label(&name_node);
         if (name == "inherited" || name == "_inherited") && self.strict == 0 {
             self.out.push(diag(self.li.node_range(&name_node), DiagnosticSeverity::ERROR, "strict",
                 "inherited disabled; use #strict syntax!".to_string()));
@@ -181,8 +194,13 @@ impl<'a> Ctx<'a> {
             }
             return;
         }
-        // Script functions: the engine never checks their parameter count (GetParCount() is always 10)
-        if !self.index.visible_funcs(self.info, name).is_empty() {
+        // Script functions: the engine never checks their parameter count (GetParCount() is always 10).
+        // A global func looks functions up in the engine only: global funcs, not this script's own or #include'd ones.
+        if self.in_global {
+            if !self.index.global_funcs(&self.info.path, name).is_empty() {
+                return;
+            }
+        } else if !self.index.visible_funcs(self.info, name).is_empty() {
             return;
         }
         // Old scripts call constants like functions: COMD_Left() (only without #strict 2)
@@ -202,6 +220,13 @@ impl<'a> Ctx<'a> {
                     self.out.push(diag(range, DiagnosticSeverity::WARNING, "too-many-params",
                         format!("{}: passing {} parameters, but only {} are used", name, args, ps.len())));
                 }
+            }
+            return;
+        }
+        if self.in_global && !self.index.visible_funcs(self.info, name).is_empty() {
+            if !self.unresolved_scope {
+                self.out.push(diag(range, DiagnosticSeverity::ERROR, "unknown-identifier",
+                    format!("unknown identifier: {} (a global func only sees global and engine functions; {} isn't global)", name, name)));
             }
             return;
         }
@@ -276,6 +301,13 @@ impl<'a> Ctx<'a> {
             _ => {}
         }
         let name = node_text(n, self.src);
+        if self.in_global && !self.locals.contains(name)
+            && self.index.visible_vars(self.info, name).iter().any(|(_, v)| v.kind == super::index::VarKind::Local)
+        {
+            self.out.push(diag(self.li.node_range(n), DiagnosticSeverity::ERROR, "local-in-global",
+                format!("using local variable in global function! ({} is a local of the script; a global func has no object context)", name)));
+            return;
+        }
         if self.locals.contains(name)
             || KEYWORDS.contains(&name)
             || ENGINE.constants.contains_key(name)
@@ -296,6 +328,35 @@ impl<'a> Ctx<'a> {
         }
         self.out.push(diag(self.li.node_range(n), DiagnosticSeverity::ERROR, "unknown-identifier",
             format!("unknown identifier: {} (no local variable, parameter, local/static variable or constant with this name)", name)));
+    }
+
+    /// The engine's tokenizer: an identifier that looks like an ID (exactly 4 chars of A-Z 0-9 _) directly followed by
+    /// '(' or a label ':' gives "stupid func label" (error from #strict 2 on, a warning below).
+    fn check_id_label(&mut self, name: &Node) {
+        let text = node_text(name, self.src);
+        if text.len() != 4 || !text.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_') {
+            return;
+        }
+        let rest = &self.src.as_bytes()[name.end_byte()..];
+        let label = match rest.first() {
+            Some(b'(') => true,
+            Some(b':') => rest.get(1) != Some(&b':'),
+            _ => false,
+        };
+        if !label {
+            return;
+        }
+        let sev = if self.strict >= 2 {
+            if self.id_label_error {
+                return;
+            }
+            self.id_label_error = true;
+            DiagnosticSeverity::ERROR
+        } else {
+            DiagnosticSeverity::WARNING
+        };
+        self.out.push(diag(self.li.node_range(name), sev, "id-label",
+            format!("stupid func label: {} (looks like a definition ID: use a name that isn't 4 capitals/digits)", text)));
     }
 
     fn check_id(&mut self, n: &Node) {
