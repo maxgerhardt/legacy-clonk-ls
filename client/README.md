@@ -56,4 +56,5 @@ FindObject2(Find_ID(FLNT))->Hit();
 ```
 
 `// c4lint: ignore(...)` and `// c4lint: ignore-next-line(...)` work too, also in `/* */` comments. The light
-bulb on a diagnostic offers "Suppress ... on this line", and completion inside `NOLINT(` lists the codes.
+bulb on a diagnostic offers "Suppress ... on this line" (and "Rename to _x" for an unused variable), and
+completion inside `NOLINT(` lists the codes.

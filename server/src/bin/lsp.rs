@@ -672,6 +672,24 @@ impl LanguageServer for Backend {
         let mut actions: CodeActionResponse = vec![];
         for d in params.context.diagnostics.iter().filter(|d| d.source.as_deref() == Some("c4script")) {
             let Some(NumberOrString::String(code)) = &d.code else { continue };
+            // unused var/param/local: rename it to _name everywhere in this script (keeps it, ends the warning)
+            if matches!(code.as_str(), "unused-var" | "unused-param" | "unused-local") {
+                let name = d.message.split('"').nth(1).unwrap_or("").to_string();
+                let locs = self.with_script(&uri, |idx, info, doc| query::references(idx, info, &doc.tree, &doc.source, d.range.start, true)).unwrap_or_default();
+                let edits: Vec<TextEdit> = locs.into_iter().filter(|l| l.uri == uri)
+                    .map(|l| TextEdit { range: l.range, new_text: format!("_{}", name) }).collect();
+                if !name.is_empty() && !edits.is_empty() {
+                    let mut changes = std::collections::HashMap::new();
+                    changes.insert(uri.clone(), edits);
+                    actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                        title: format!("Rename to _{} (keep it unused on purpose)", name),
+                        kind: Some(CodeActionKind::QUICKFIX),
+                        diagnostics: Some(vec![d.clone()]),
+                        edit: Some(WorkspaceEdit { changes: Some(changes), ..Default::default() }),
+                        ..Default::default()
+                    }));
+                }
+            }
             let row = d.range.start.line as usize;
             let Some(line) = lines.get(row) else { continue };
             let line = line.trim_end_matches('\r');
