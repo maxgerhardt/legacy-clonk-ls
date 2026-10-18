@@ -1,0 +1,1732 @@
+{
+ "files": {
+  "DefCore": {
+   "DefCore": [
+    {
+     "key": "id",
+     "kind": "id",
+     "default": "C4ID_None"
+    },
+    {
+     "key": "Version",
+     "kind": "ints"
+    },
+    {
+     "key": "Name",
+     "kind": "string",
+     "default": "\"Undefined\""
+    },
+    {
+     "key": "RequireDef",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "Category",
+     "kind": "flags",
+     "default": "0",
+     "values": [
+      "C4D_StaticBack",
+      "C4D_Structure",
+      "C4D_Vehicle",
+      "C4D_Living",
+      "C4D_Object",
+      "C4D_Goal",
+      "C4D_Environment",
+      "C4D_SelectBuilding",
+      "C4D_SelectVehicle",
+      "C4D_SelectMaterial",
+      "C4D_SelectKnowledge",
+      "C4D_SelectHomebase",
+      "C4D_SelectAnimal",
+      "C4D_SelectNest",
+      "C4D_SelectInEarth",
+      "C4D_SelectVegetation",
+      "C4D_TradeLiving",
+      "C4D_Magic",
+      "C4D_CrewMember",
+      "C4D_Rule",
+      "C4D_Background",
+      "C4D_Parallax",
+      "C4D_MouseSelect",
+      "C4D_Foreground",
+      "C4D_MouseIgnore",
+      "C4D_IgnoreFoW"
+     ]
+    },
+    {
+     "key": "MaxUserSelect",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Timer",
+     "kind": "int",
+     "default": "35"
+    },
+    {
+     "key": "TimerCall",
+     "kind": "function",
+     "default": "\"\""
+    },
+    {
+     "key": "ContactCalls",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Value",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Mass",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Components",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "SolidMask",
+     "kind": "ints",
+     "default": "TargetRect0"
+    },
+    {
+     "key": "TopFace",
+     "kind": "ints",
+     "default": "TargetRect0"
+    },
+    {
+     "key": "Picture",
+     "kind": "int",
+     "default": "Rect0"
+    },
+    {
+     "key": "PictureFE",
+     "kind": "int"
+    },
+    {
+     "key": "Entrance",
+     "kind": "int",
+     "default": "Rect0"
+    },
+    {
+     "key": "Collection",
+     "kind": "int",
+     "default": "Rect0"
+    },
+    {
+     "key": "CollectionLimit",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Placement",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Exclusive",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "ContactIncinerate",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "BlastIncinerate",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "BurnTo",
+     "kind": "id",
+     "default": "C4ID_None"
+    },
+    {
+     "key": "Base",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Line",
+     "kind": "flags",
+     "default": "0",
+     "values": [
+      "C4D_LinePower",
+      "C4D_LineSource",
+      "C4D_LineDrain",
+      "C4D_LineLightning",
+      "C4D_LineVolcano",
+      "C4D_LineRope",
+      "C4D_LineColored",
+      "C4D_LineVertex"
+     ]
+    },
+    {
+     "key": "LineConnect",
+     "kind": "flags",
+     "default": "0",
+     "values": [
+      "C4D_PowerInput",
+      "C4D_PowerOutput",
+      "C4D_LiquidInput",
+      "C4D_LiquidOutput",
+      "C4D_PowerGenerator",
+      "C4D_PowerConsumer",
+      "C4D_LiquidPump",
+      "C4D_ConnectRope",
+      "C4D_EnergyHolder"
+     ]
+    },
+    {
+     "key": "LineIntersect",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Prey",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Edible",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "CrewMember",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "NoStandardCrew",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Growth",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Rebuy",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Construction",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "ConstructTo",
+     "kind": "id",
+     "default": "0"
+    },
+    {
+     "key": "Grab",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "GrabPutGet",
+     "kind": "flags",
+     "default": "0",
+     "values": [
+      "C4D_GrabGet",
+      "C4D_GrabPut"
+     ]
+    },
+    {
+     "key": "Collectible",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Rotate",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "RotatedEntrance",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Chop",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Float",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "ContainBlast",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "ColorByOwner",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "ColorByMaterial",
+     "kind": "string",
+     "default": "\"\""
+    },
+    {
+     "key": "HorizontalFix",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "BorderBound",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "LiftTop",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "UprightAttach",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "StretchGrowth",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Basement",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "NoBurnDecay",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "IncompleteActivity",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "AttractLightning",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Oversize",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Fragile",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Explosive",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Projectile",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "NoPushEnter",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "DragImagePicture",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "VehicleControl",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Pathfinder",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "MoveToRange",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "NoComponentMass",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "NoStabilize",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "ClosedContainer",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "SilentCommands",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "NoBurnDamage",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "TemporaryCrew",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "SmokeRate",
+     "kind": "int",
+     "default": "100"
+    },
+    {
+     "key": "BlitMode",
+     "kind": "int",
+     "default": "C4D_Blit_Normal"
+    },
+    {
+     "key": "NoBreath",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "ConSizeOff",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "NoSell",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "NoGet",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "NoFight",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "RotatedSolidmasks",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "NoTransferZones",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "AutoContextMenu",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "NeededGfxMode",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "AllowPictureStack",
+     "kind": "flags",
+     "default": "0",
+     "values": [
+      "APS_Color",
+      "APS_Graphics",
+      "APS_Name",
+      "APS_Overlay"
+     ]
+    },
+    {
+     "key": "HideHUDBars",
+     "kind": "flags",
+     "default": "0",
+     "values": [
+      "Energy",
+      "MagicEnergy",
+      "Breath",
+      "All"
+     ]
+    },
+    {
+     "key": "HideHUDElements",
+     "kind": "flags",
+     "default": "0",
+     "values": [
+      "Portrait",
+      "Captain",
+      "Name",
+      "Rank",
+      "RankImage",
+      "Inventory",
+      "All"
+     ]
+    },
+    {
+     "key": "Scale",
+     "kind": "int",
+     "default": "100"
+    },
+    {
+     "key": "BaseAutoSell",
+     "kind": "int",
+     "default": "id == C4ID_Gold"
+    },
+    {
+     "key": "Width",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Height",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Offset",
+     "kind": "ints"
+    },
+    {
+     "key": "Vertices",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "VertexX",
+     "kind": "ints"
+    },
+    {
+     "key": "VertexY",
+     "kind": "ints"
+    },
+    {
+     "key": "VertexCNAT",
+     "kind": "ints"
+    },
+    {
+     "key": "VertexFriction",
+     "kind": "ints"
+    },
+    {
+     "key": "ContactDensity",
+     "kind": "int",
+     "default": "C4M_Solid"
+    },
+    {
+     "key": "FireTop",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "AttachX",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "AttachY",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "AttachVtx",
+     "kind": "int",
+     "default": "0"
+    }
+   ],
+   "Physical": [
+    {
+     "key": "Energy",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Breath",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Walk",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Jump",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Scale",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Hangle",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Dig",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Swim",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Throw",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Push",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Fight",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Magic",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Float",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "CanScale",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "CanHangle",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "CanDig",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "CanConstruct",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "CanChop",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "CanFly",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "CorrosionResist",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "BreatheWater",
+     "kind": "int",
+     "default": "0"
+    }
+   ]
+  },
+  "ActMap": {
+   "Action": [
+    {
+     "key": "Name",
+     "kind": "string",
+     "default": "\"\""
+    },
+    {
+     "key": "Procedure",
+     "kind": "procedure",
+     "default": "\"\"",
+     "values": [
+      "WALK",
+      "FLIGHT",
+      "KNEEL",
+      "SCALE",
+      "HANGLE",
+      "DIG",
+      "SWIM",
+      "THROW",
+      "BRIDGE",
+      "BUILD",
+      "PUSH",
+      "CHOP",
+      "LIFT",
+      "FLOAT",
+      "ATTACH",
+      "FIGHT",
+      "CONNECT",
+      "PULL",
+      "NONE"
+     ]
+    },
+    {
+     "key": "Directions",
+     "kind": "int",
+     "default": "1"
+    },
+    {
+     "key": "FlipDir",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Length",
+     "kind": "int",
+     "default": "1"
+    },
+    {
+     "key": "Attach",
+     "kind": "flags",
+     "default": "0",
+     "values": [
+      "CNAT_None",
+      "CNAT_Left",
+      "CNAT_Right",
+      "CNAT_Top",
+      "CNAT_Bottom",
+      "CNAT_Center",
+      "CNAT_MultiAttach",
+      "CNAT_NoCollision"
+     ]
+    },
+    {
+     "key": "Delay",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Facet",
+     "kind": "ints",
+     "default": "TargetRect0"
+    },
+    {
+     "key": "FacetBase",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "FacetTopFace",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "FacetTargetStretch",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "NextAction",
+     "kind": "action",
+     "default": "\"\""
+    },
+    {
+     "key": "NoOtherAction",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "StartCall",
+     "kind": "function",
+     "default": "\"\""
+    },
+    {
+     "key": "EndCall",
+     "kind": "function",
+     "default": "\"\""
+    },
+    {
+     "key": "AbortCall",
+     "kind": "function",
+     "default": "\"\""
+    },
+    {
+     "key": "PhaseCall",
+     "kind": "function",
+     "default": "\"\""
+    },
+    {
+     "key": "Sound",
+     "kind": "string",
+     "default": "\"\""
+    },
+    {
+     "key": "ObjectDisabled",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "DigFree",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "EnergyUsage",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "InLiquidAction",
+     "kind": "action",
+     "default": "\"\""
+    },
+    {
+     "key": "TurnAction",
+     "kind": "action",
+     "default": "\"\""
+    },
+    {
+     "key": "Reverse",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Step",
+     "kind": "int",
+     "default": "1"
+    }
+   ]
+  },
+  "Scenario": {
+   "Head": [
+    {
+     "key": "Icon",
+     "kind": "int",
+     "default": "18"
+    },
+    {
+     "key": "Title",
+     "kind": "string",
+     "default": "\"Default Title\""
+    },
+    {
+     "key": "Loader",
+     "kind": "string",
+     "default": "\"\""
+    },
+    {
+     "key": "Font",
+     "kind": "string",
+     "default": "\"\""
+    },
+    {
+     "key": "Version",
+     "kind": "ints"
+    },
+    {
+     "key": "Difficulty",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Access",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "MaxPlayer",
+     "kind": "int",
+     "default": "C4S_MaxPlayerDefault"
+    },
+    {
+     "key": "MaxPlayerLeague",
+     "kind": "int",
+     "default": "MaxPlayer"
+    },
+    {
+     "key": "MinPlayer",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "SaveGame",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Replay",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Film",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "DisableMouse",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "NoInitialize",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "RandomSeed",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "ForcedAutoContextMenu",
+     "kind": "int",
+     "default": "fSection ? MainForcedAutoContextMenu : -1"
+    },
+    {
+     "key": "ForcedAutoStopControl",
+     "kind": "int",
+     "default": "fSection ? MainForcedControlStyle : -1"
+    },
+    {
+     "key": "Engine",
+     "kind": "string",
+     "default": "\"\""
+    },
+    {
+     "key": "MissionAccess",
+     "kind": "string",
+     "default": "\"\""
+    },
+    {
+     "key": "NetworkGame",
+     "kind": "bool",
+     "default": "false"
+    },
+    {
+     "key": "NetworkRuntimeJoin",
+     "kind": "bool",
+     "default": "false"
+    },
+    {
+     "key": "ForcedGfxMode",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "ForcedNoCrew",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "DefCrewStrength",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Origin",
+     "kind": "string",
+     "default": "StdStrBuf()"
+    }
+   ],
+   "Definitions": [
+    {
+     "key": "LocalOnly",
+     "kind": "bool",
+     "default": "false"
+    },
+    {
+     "key": "AllowUserChange",
+     "kind": "bool",
+     "default": "false"
+    },
+    {
+     "key": "Definitions",
+     "kind": "packs",
+     "default": "decltype(Definitions)()"
+    },
+    {
+     "key": "SkipDefs",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "Definition1",
+     "kind": "pack"
+    },
+    {
+     "key": "Definition2",
+     "kind": "pack"
+    },
+    {
+     "key": "Definition3",
+     "kind": "pack"
+    },
+    {
+     "key": "Definition4",
+     "kind": "pack"
+    },
+    {
+     "key": "Definition5",
+     "kind": "pack"
+    },
+    {
+     "key": "Definition6",
+     "kind": "pack"
+    },
+    {
+     "key": "Definition7",
+     "kind": "pack"
+    },
+    {
+     "key": "Definition8",
+     "kind": "pack"
+    },
+    {
+     "key": "Definition9",
+     "kind": "pack"
+    },
+    {
+     "key": "Definition10",
+     "kind": "pack"
+    }
+   ],
+   "Game": [
+    {
+     "key": "Mode",
+     "kind": "int",
+     "default": "C4S_Cooperative"
+    },
+    {
+     "key": "Elimination",
+     "kind": "int",
+     "default": "C4S_EliminateCrew"
+    },
+    {
+     "key": "CooperativeGoal",
+     "kind": "int",
+     "default": "C4S_NoGoal"
+    },
+    {
+     "key": "CreateObjects",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "ClearObjects",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "ClearMaterials",
+     "kind": "materials",
+     "default": "C4NameList()"
+    },
+    {
+     "key": "ValueGain",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "EnableRemoveFlag",
+     "kind": "bool",
+     "default": "false"
+    },
+    {
+     "key": "StructNeedMaterial",
+     "kind": "bool",
+     "default": "false"
+    },
+    {
+     "key": "StructNeedEnergy",
+     "kind": "bool",
+     "default": "true"
+    },
+    {
+     "key": "ValueOverloads",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "LandscapePushPull",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "LandscapeInsertThrust",
+     "kind": "int",
+     "default": "1"
+    },
+    {
+     "key": "BaseFunctionality",
+     "kind": "flags",
+     "default": "BASEFUNC_Default",
+     "values": [
+      "BASEFUNC_AutoSellContents",
+      "BASEFUNC_RegenerateEnergy",
+      "BASEFUNC_Buy",
+      "BASEFUNC_Sell",
+      "BASEFUNC_RejectEntrance",
+      "BASEFUNC_Extinguish",
+      "BASEFUNC_Default"
+     ]
+    },
+    {
+     "key": "BaseRegenerateEnergyPrice",
+     "kind": "int",
+     "default": "BASE_RegenerateEnergyPrice"
+    },
+    {
+     "key": "Goals",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "Rules",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "FoWColor",
+     "kind": "int",
+     "default": "0u"
+    }
+   ],
+   "Player1": [
+    {
+     "key": "StandardCrew",
+     "kind": "id",
+     "default": "C4ID_None"
+    },
+    {
+     "key": "Clonks",
+     "kind": "sval",
+     "default": "C4SVal(1, 0, 1, 10)"
+    },
+    {
+     "key": "Wealth",
+     "kind": "sval",
+     "default": "C4SVal(0, 0, 0, 250)"
+    },
+    {
+     "key": "Position",
+     "kind": "ints"
+    },
+    {
+     "key": "EnforcePosition",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Crew",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "Buildings",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "Vehicles",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "Material",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "Knowledge",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "HomeBaseMaterial",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "HomeBaseProduction",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "Magic",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    }
+   ],
+   "Player2": [
+    {
+     "key": "StandardCrew",
+     "kind": "id",
+     "default": "C4ID_None"
+    },
+    {
+     "key": "Clonks",
+     "kind": "sval",
+     "default": "C4SVal(1, 0, 1, 10)"
+    },
+    {
+     "key": "Wealth",
+     "kind": "sval",
+     "default": "C4SVal(0, 0, 0, 250)"
+    },
+    {
+     "key": "Position",
+     "kind": "ints"
+    },
+    {
+     "key": "EnforcePosition",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Crew",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "Buildings",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "Vehicles",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "Material",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "Knowledge",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "HomeBaseMaterial",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "HomeBaseProduction",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "Magic",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    }
+   ],
+   "Player3": [
+    {
+     "key": "StandardCrew",
+     "kind": "id",
+     "default": "C4ID_None"
+    },
+    {
+     "key": "Clonks",
+     "kind": "sval",
+     "default": "C4SVal(1, 0, 1, 10)"
+    },
+    {
+     "key": "Wealth",
+     "kind": "sval",
+     "default": "C4SVal(0, 0, 0, 250)"
+    },
+    {
+     "key": "Position",
+     "kind": "ints"
+    },
+    {
+     "key": "EnforcePosition",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Crew",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "Buildings",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "Vehicles",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "Material",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "Knowledge",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "HomeBaseMaterial",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "HomeBaseProduction",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "Magic",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    }
+   ],
+   "Player4": [
+    {
+     "key": "StandardCrew",
+     "kind": "id",
+     "default": "C4ID_None"
+    },
+    {
+     "key": "Clonks",
+     "kind": "sval",
+     "default": "C4SVal(1, 0, 1, 10)"
+    },
+    {
+     "key": "Wealth",
+     "kind": "sval",
+     "default": "C4SVal(0, 0, 0, 250)"
+    },
+    {
+     "key": "Position",
+     "kind": "ints"
+    },
+    {
+     "key": "EnforcePosition",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "Crew",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "Buildings",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "Vehicles",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "Material",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "Knowledge",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "HomeBaseMaterial",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "HomeBaseProduction",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "Magic",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    }
+   ],
+   "Landscape": [
+    {
+     "key": "ExactLandscape",
+     "kind": "bool",
+     "default": "false"
+    },
+    {
+     "key": "Vegetation",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "VegetationLevel",
+     "kind": "sval",
+     "default": "C4SVal(50, 30, 0, 100)"
+    },
+    {
+     "key": "InEarth",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "InEarthLevel",
+     "kind": "sval",
+     "default": "C4SVal(50, 0, 0, 100)"
+    },
+    {
+     "key": "Sky",
+     "kind": "string",
+     "default": "\"\""
+    },
+    {
+     "key": "SkyFade",
+     "kind": "ints"
+    },
+    {
+     "key": "NoSky",
+     "kind": "bool",
+     "default": "false"
+    },
+    {
+     "key": "BottomOpen",
+     "kind": "bool",
+     "default": "false"
+    },
+    {
+     "key": "TopOpen",
+     "kind": "bool",
+     "default": "true"
+    },
+    {
+     "key": "LeftOpen",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "RightOpen",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "AutoScanSideOpen",
+     "kind": "bool",
+     "default": "true"
+    },
+    {
+     "key": "MapWidth",
+     "kind": "sval",
+     "default": "C4SVal(100, 0, 64, 250)"
+    },
+    {
+     "key": "MapHeight",
+     "kind": "sval",
+     "default": "C4SVal(50, 0, 40, 250)"
+    },
+    {
+     "key": "MapZoom",
+     "kind": "sval",
+     "default": "C4SVal(10, 0, 5, 15)"
+    },
+    {
+     "key": "Amplitude",
+     "kind": "sval",
+     "default": "C4SVal(0)"
+    },
+    {
+     "key": "Phase",
+     "kind": "sval",
+     "default": "C4SVal(50)"
+    },
+    {
+     "key": "Period",
+     "kind": "sval",
+     "default": "C4SVal(15)"
+    },
+    {
+     "key": "Random",
+     "kind": "sval",
+     "default": "C4SVal(0)"
+    },
+    {
+     "key": "Material",
+     "kind": "material",
+     "default": "\"Earth\""
+    },
+    {
+     "key": "Liquid",
+     "kind": "material",
+     "default": "\"Water\""
+    },
+    {
+     "key": "LiquidLevel",
+     "kind": "sval",
+     "default": "C4SVal()"
+    },
+    {
+     "key": "MapPlayerExtend",
+     "kind": "bool",
+     "default": "false"
+    },
+    {
+     "key": "Layers",
+     "kind": "materials",
+     "default": "C4NameList()"
+    },
+    {
+     "key": "Gravity",
+     "kind": "sval",
+     "default": "C4SVal(100, 0, 10, 200)"
+    },
+    {
+     "key": "NoScan",
+     "kind": "bool",
+     "default": "false"
+    },
+    {
+     "key": "KeepMapCreator",
+     "kind": "bool",
+     "default": "false"
+    },
+    {
+     "key": "SkyScrollMode",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "NewStyleLandscape",
+     "kind": "int",
+     "default": "0"
+    },
+    {
+     "key": "FoWRes",
+     "kind": "int",
+     "default": "static_cast<int32_t>(CClrModAddMap::iDefResolutionX)"
+    },
+    {
+     "key": "ShadeMaterials",
+     "kind": "int",
+     "default": "shadeMaterialsDefault"
+    },
+    {
+     "key": "EnableTextureOverlays",
+     "kind": "int",
+     "default": "enableTextureOverlaysDefault"
+    }
+   ],
+   "Animals": [
+    {
+     "key": "Animal",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    },
+    {
+     "key": "Nest",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    }
+   ],
+   "Weather": [
+    {
+     "key": "Climate",
+     "kind": "sval",
+     "default": "C4SVal(50, 10)"
+    },
+    {
+     "key": "StartSeason",
+     "kind": "sval",
+     "default": "C4SVal(50, 50)"
+    },
+    {
+     "key": "YearSpeed",
+     "kind": "sval",
+     "default": "C4SVal(50)"
+    },
+    {
+     "key": "Rain",
+     "kind": "sval",
+     "default": "C4SVal()"
+    },
+    {
+     "key": "Wind",
+     "kind": "sval",
+     "default": "C4SVal(0, 70, -100, +100)"
+    },
+    {
+     "key": "Lightning",
+     "kind": "sval",
+     "default": "C4SVal()"
+    },
+    {
+     "key": "Precipitation",
+     "kind": "material",
+     "default": "\"Water\""
+    },
+    {
+     "key": "NoGamma",
+     "kind": "bool",
+     "default": "true"
+    }
+   ],
+   "Disasters": [
+    {
+     "key": "Meteorite",
+     "kind": "sval",
+     "default": "C4SVal()"
+    },
+    {
+     "key": "Volcano",
+     "kind": "sval",
+     "default": "C4SVal()"
+    },
+    {
+     "key": "Earthquake",
+     "kind": "sval",
+     "default": "C4SVal()"
+    }
+   ],
+   "Environment": [
+    {
+     "key": "Objects",
+     "kind": "idlist",
+     "default": "C4IDList()"
+    }
+   ]
+  }
+ },
+ "materials": [
+  "Acid",
+  "Ashes",
+  "Coal",
+  "Crystal",
+  "DuroLava",
+  "Earth",
+  "FlyAshes",
+  "FlySand",
+  "Gold",
+  "Granite",
+  "Ice",
+  "Lava",
+  "Oil",
+  "Ore",
+  "Rock",
+  "Sand",
+  "Snow",
+  "Sulphur",
+  "Tunnel",
+  "Vehicle",
+  "Water"
+ ],
+ "texmap": [
+  "Tunnel-Smooth",
+  "Tunnel-Rough",
+  "DuroLava-Smooth",
+  "Water-Liquid",
+  "Oil-Liquid",
+  "Acid-Liquid",
+  "Lava-Liquid",
+  "DuroLava-Liquid",
+  "Water-Smooth",
+  "Oil-Smooth",
+  "Acid-Smooth",
+  "Lava-Smooth",
+  "Earth-Ridge",
+  "Earth-Smooth",
+  "Earth-Rough",
+  "Earth-Smooth2",
+  "Ashes-Smooth3",
+  "Ashes-Rough",
+  "Ashes-Ridge",
+  "Ore-Rough",
+  "Ore-Rock",
+  "Ore-Ridge",
+  "Granite-Rough",
+  "Granite-Ridge",
+  "Granite-Rock",
+  "Gold-Rough",
+  "Rock-Rough",
+  "Rock-Ridge",
+  "Rock-Rock",
+  "Sulphur-Swirl",
+  "Coal-Swirl",
+  "Sand-Smooth",
+  "Sand-Smooth2",
+  "Sand-Smooth3",
+  "FlySand-Smooth",
+  "FlyAshes-Smooth",
+  "Crystal-Flare",
+  "Crystal-Structure",
+  "Crystal-Structure2",
+  "Ice-Flare2",
+  "Ice-Flare3",
+  "Ice-Structure",
+  "Ice-Structure2",
+  "Snow-Smooth",
+  "Snow-Spots",
+  "Snow-Flare2",
+  "FlySand-Smooth2",
+  "FlySand-Smooth3"
+ ],
+ "packs": [
+  "Fantasy.c4d",
+  "Fantasy.c4f",
+  "FarWorlds.c4d",
+  "FarWorlds.c4f",
+  "Hazard.c4d",
+  "Hazard.c4f",
+  "Knights.c4d",
+  "Knights.c4f",
+  "Melees.c4f",
+  "Missions.c4f",
+  "Objects.c4d",
+  "Races.c4f",
+  "Tutorial.c4f",
+  "Western.c4d",
+  "Western.c4f",
+  "Worlds.c4f"
+ ]
+}

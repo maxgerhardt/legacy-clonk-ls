@@ -5,6 +5,7 @@ pub mod diagnostics;
 pub mod engine;
 pub mod format;
 pub mod index;
+pub mod ini;
 pub mod query;
 pub mod strings;
 pub mod text;

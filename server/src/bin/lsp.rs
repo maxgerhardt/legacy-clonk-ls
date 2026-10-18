@@ -262,6 +262,23 @@ impl Backend {
     }
 
     /// Run a query against an open script document with fresh index info.
+    /// DefCore.txt / Scenario.txt / ActMap.txt: run `f` with the file kind, the index, the file's path and game folder.
+    fn with_ini<T>(&self, uri: &Url, f: impl FnOnce(legacy_clonk_ls::analysis::ini::IniFile, &Document, &legacy_clonk_ls::analysis::ini::Ctx) -> T) -> Option<T> {
+        use legacy_clonk_ls::analysis::ini::{Ctx, IniFile};
+        let doc = self.documents.get(uri)?;
+        let file = match doc.doc_type {
+            DocType::DefCore => IniFile::DefCore,
+            DocType::ActMap => IniFile::ActMap,
+            DocType::ScenarioTxt => IniFile::Scenario,
+            _ => return None,
+        };
+        let path = c4index::uri_to_path(uri)?;
+        let game = self.game.read().ok().and_then(|g| g.clone()).map(|(d, _)| d);
+        let index = self.index.read().ok()?;
+        let ctx = Ctx { index: &index, path: &path, game_dir: game.as_deref() };
+        Some(f(file, &doc, &ctx))
+    }
+
     fn with_script<T>(&self, uri: &Url, f: impl FnOnce(&Index, &c4index::FileInfo, &Document) -> T) -> Option<T> {
         let doc = self.documents.get(uri)?;
         if !matches!(doc.doc_type, DocType::Script) {
@@ -434,7 +451,7 @@ impl LanguageServer for Backend {
                     ..Default::default()
                 }),
                 completion_provider: Some(CompletionOptions {
-                    trigger_characters: Some([">", ".", "#", "$", "~"].iter().map(|s| s.to_string()).collect()),
+                    trigger_characters: Some([">", ".", "#", "$", "~", "[", "=", "|", ";"].iter().map(|s| s.to_string()).collect()),
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -554,6 +571,12 @@ impl LanguageServer for Backend {
         let uri = params.text_document_position.text_document.uri;
         match self.documents.get(&uri) {
             Some(doc) => {
+                if matches!(doc.doc_type, DocType::DefCore | DocType::ActMap | DocType::ScenarioTxt) {
+                    drop(doc);
+                    let pos = params.text_document_position.position;
+                    let items = self.with_ini(&uri, |file, doc, ctx| legacy_clonk_ls::analysis::ini::complete(file, &doc.source, pos, ctx));
+                    return Ok(items.flatten().map(CompletionResponse::Array));
+                }
                 if matches!(doc.doc_type, DocType::Script) {
                     drop(doc);
                     let pos = params.text_document_position.position;
@@ -614,6 +637,12 @@ impl LanguageServer for Backend {
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         let uri = params.text_document_position_params.text_document.uri;
         let pos = params.text_document_position_params.position;
+        if let Some(text) = self.with_ini(&uri, |file, doc, ctx| legacy_clonk_ls::analysis::ini::hover(file, &doc.source, pos, ctx)).flatten() {
+            return Ok(Some(Hover {
+                contents: HoverContents::Markup(MarkupContent { kind: MarkupKind::Markdown, value: text }),
+                range: None,
+            }));
+        }
         if let Some(text) = self.with_script(&uri, |idx, info, doc| query::hover(idx, info, &doc.tree, &doc.source, pos)).flatten() {
             return Ok(Some(Hover {
                 contents: HoverContents::Markup(MarkupContent { kind: MarkupKind::Markdown, value: text }),
