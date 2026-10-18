@@ -805,7 +805,20 @@ impl Index {
             .any(|id| self.script_of(id, &info.path).is_none() && self.id_for(id, &info.path).map_or(true, |i| i.script.is_some()))
     }
 
-    fn script_of(&self, id: &str, from: &Path) -> Option<&FileInfo> {
+    /// Scripts that #include the definition `id` (directly).
+    pub fn includers_of(&self, id: &str) -> Vec<&FileInfo> {
+        self.lookup().includers.get(id).into_iter().flatten().filter_map(|k| self.files.get(k)).collect()
+    }
+
+    /// Scripts that #appendto the definition `id` (or every definition: `#appendto *`).
+    pub fn appenders_of(&self, id: &str) -> Vec<&FileInfo> {
+        let lk = self.lookup();
+        lk.appenders.get(id).into_iter().flatten().chain(lk.appenders.get("*").into_iter().flatten())
+            .filter_map(|k| self.files.get(k))
+            .collect()
+    }
+
+    pub fn script_of(&self, id: &str, from: &Path) -> Option<&FileInfo> {
         let script = self.id_for(id, from)?.script.as_ref()?;
         self.files.get(&path_key(script))
     }

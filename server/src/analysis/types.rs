@@ -176,13 +176,14 @@ pub fn clear_cache() {
     if let Ok(mut s) = FIELDS.lock() {
         s.clear();
     }
+    super::objids::clear_cache();
     if let Ok(mut t) = TREES.lock() {
         t.clear();
     }
 }
 
 /// The parsed script at `path` (from disk, cached); `current` = (path key, source) of the file being analysed.
-fn parsed(path: &std::path::Path, current: Option<(&str, &str)>) -> Option<Arc<(String, Tree)>> {
+pub(crate) fn parsed_script(path: &std::path::Path, current: Option<(&str, &str)>) -> Option<Arc<(String, Tree)>> {
     let key = path_key(path);
     if let Some(t) = TREES.lock().ok().and_then(|m| m.get(&key).cloned()) {
         return Some(t);
@@ -531,7 +532,9 @@ impl<'a> Infer<'a> {
                     self.expr(a, s);
                 }
                 let name = n.child_by_field_name("name").map(|x| self.text(&x)).unwrap_or("");
-                self.call_type(name, is_arrow_call(&n) || n.child_by_field_name("id").is_some())
+                // obj->F(): the receiver's definitions when known (objids.rs)
+                let ids = if is_arrow_call(&n) { super::objids::receiver_ids(self.index, self.info, self.src, &n) } else { None };
+                self.call_type(name, is_arrow_call(&n) || n.child_by_field_name("id").is_some(), ids)
             }
             "arrow_expression" => {
                 let nc: Vec<Node> = named_children(&n).into_iter().filter(|c| c.kind() != "comment").collect();
@@ -662,11 +665,20 @@ impl<'a> Infer<'a> {
     }
 
     /// Type of a call by name: script functions (their inferred return types), else the engine function.
-    fn call_type(&self, name: &str, arrow: bool) -> Ty {
+    fn call_type(&self, name: &str, arrow: bool, ids: Option<Vec<String>>) -> Ty {
         match name {
             "this" => return OBJECT,
             "Par" | "inherited" | "_inherited" => return ANY,
             _ => {}
+        }
+        if let Some(ids) = ids {
+            // the object's own functions win over the engine's (C4AulFunc::FindSameNameFunc)
+            let funcs = super::objids::member_funcs(self.index, self.info, &ids, name);
+            if funcs.is_empty() {
+                return engine_return(name).unwrap_or(ANY);
+            }
+            let t = funcs.iter().fold(NONE, |t, (file, f)| t | self.summary(file, f));
+            return if t == NONE { ANY } else { t };
         }
         let funcs = if arrow {
             self.index.reachable_funcs(&self.info.path, name)
@@ -709,7 +721,7 @@ impl<'a> Infer<'a> {
             }
         }
         let current_key = path_key(&self.info.path);
-        let t = match parsed(&file.path, Some((&current_key, self.src))) {
+        let t = match parsed_script(&file.path, Some((&current_key, self.src))) {
             Some(entry) => {
                 let (src, tree) = (&entry.0, &entry.1);
                 let root = tree.root_node();
@@ -771,7 +783,7 @@ impl<'a> Infer<'a> {
     fn infer_other(&self, file: &FileInfo, i: usize) -> Option<FuncTypes> {
         let f = file.funcs.get(i)?;
         let current_key = path_key(&self.info.path);
-        let entry = parsed(&file.path, Some((&current_key, self.src)))?;
+        let entry = parsed_script(&file.path, Some((&current_key, self.src)))?;
         let (src, tree) = (&entry.0, &entry.1);
         let root = tree.root_node();
         let func = find_func(&root, src, f)?;
@@ -919,7 +931,7 @@ fn literal_type(v: &str) -> Ty {
 }
 
 /// The function node of `f` in a parsed script.
-fn find_func<'t>(root: &Node<'t>, src: &str, f: &FuncDef) -> Option<Node<'t>> {
+pub(crate) fn find_func<'t>(root: &Node<'t>, src: &str, f: &FuncDef) -> Option<Node<'t>> {
     named_children(root).into_iter().find(|c| {
         matches!(c.kind(), "function_definition" | "old_function_definition")
             && c.child_by_field_name("name").map(|n| node_text(&n, src) == f.name && n.start_position().row as u32 == f.name_range.start.line).unwrap_or(false)

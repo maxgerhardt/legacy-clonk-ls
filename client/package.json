@@ -94,6 +94,11 @@
 					"type": "boolean",
 					"default": true,
 					"description": "Infer the types of script variables (local, static) from every value the indexed scripts assign to them (a local from its definition's scripts and obj.name = x writes, a static from all scripts). Shown on hover and used by the type checks. Needs typeChecks."
+				},
+				"legacy-clonk-ext.objectIds": {
+					"type": "boolean",
+					"default": true,
+					"description": "Track which definition an object variable holds (CreateObject(ID, ...), FindObject2(Find_ID(ID)), this, ...) so obj->F() resolves to exactly that definition's functions: hover, go to definition, return types, parameter checks, and a warning when the definition has no such function. Unknown objects behave as before. Needs typeChecks."
 				}
 			}
 		},

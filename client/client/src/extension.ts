@@ -51,10 +51,11 @@ function configureAndStartLanguageServer(context: ExtensionContext) {
 	const gameExecutable = workspace.getConfiguration(CONFIG_NAME).get<string>('pathToGameExecutable');
 	const typeChecks = workspace.getConfiguration(CONFIG_NAME).get<boolean>('typeChecks', true);
 	const fieldTypes = workspace.getConfiguration(CONFIG_NAME).get<boolean>('fieldTypes', true);
+	const objectIds = workspace.getConfiguration(CONFIG_NAME).get<boolean>('objectIds', true);
 	const stringTableLanguages = workspace.getConfiguration(CONFIG_NAME).get<string[]>('stringTableLanguages', ['DE', 'US']);
 	const initializationOptions = gameExecutable
-		? { gameDir: path.dirname(gameExecutable), typeChecks, fieldTypes, stringTableLanguages }
-		: { typeChecks, fieldTypes, stringTableLanguages };
+		? { gameDir: path.dirname(gameExecutable), typeChecks, fieldTypes, objectIds, stringTableLanguages }
+		: { typeChecks, fieldTypes, objectIds, stringTableLanguages };
 
 	const serverOptions: ServerOptions = {
 		run: {

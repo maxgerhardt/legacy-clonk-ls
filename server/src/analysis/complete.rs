@@ -244,14 +244,8 @@ impl<'a> Ctx<'a> {
 
     /// The script of a definition and the scripts it sees (#include chain, #appendto).
     fn def_scope(&self, id: &str) -> Vec<&'a FileInfo> {
-        if self.info.def_id.as_deref() == Some(id) {
-            return self.index.scope_files(self.info);
-        }
-        let script = self.index.id_for(id, &self.info.path).and_then(|i| i.script.as_ref());
-        match script.and_then(|s| self.index.files.get(&path_key(s))) {
-            Some(f) => self.index.scope_files(f),
-            None => vec![],
-        }
+        // its #include chain and the #appendto scripts this script's game loads (objids::def_scripts)
+        super::objids::def_scripts(self.index, self.info, id).into_iter().map(|(_, f)| f).collect()
     }
 }
 

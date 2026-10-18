@@ -63,7 +63,11 @@ pub fn func_markdown(file: &FileInfo, f: &FuncDef, index: &Index) -> String {
 }
 
 /// Script functions for a call: visible ones first; for -> calls (or if none visible) all definitions.
-fn call_targets<'a>(index: &'a Index, info: &'a FileInfo, name: &str, arrow: bool) -> Vec<(&'a FileInfo, &'a FuncDef)> {
+fn call_targets<'a>(index: &'a Index, info: &'a FileInfo, name: &str, arrow: bool, ids: Option<&[String]>) -> Vec<(&'a FileInfo, &'a FuncDef)> {
+    // obj->F() on an object whose definitions are known: exactly their functions (objids.rs)
+    if let Some(ids) = ids {
+        return super::objids::member_funcs(index, info, ids, name);
+    }
     let visible = index.visible_funcs(info, name);
     if !arrow && !visible.is_empty() {
         return visible;
@@ -88,12 +92,16 @@ pub fn hover(index: &Index, info: &FileInfo, tree: &Tree, src: &str, pos: Positi
     }
     match target_at(tree, src, &li, pos)? {
         Target::Call { name, arrow, node } => {
-            let defs = call_targets(index, info, &name, arrow);
+            let ids = if arrow { super::objids::receiver_ids(index, info, src, &node) } else { None };
+            let defs = call_targets(index, info, &name, arrow, ids.as_deref());
             let mut parts: Vec<String> = defs.iter().take(5).map(|(f, d)| func_markdown(f, d, index)).collect();
             if defs.len() > 5 {
                 parts.push(format!("*... and {} more definitions*", defs.len() - 5));
             }
-            if parts.is_empty() || arrow {
+            if let Some(ids) = &ids {
+                parts.insert(0, format!("*call on an object of {}* (inferred)", ids.iter().map(|i| format!("`{}`", i)).collect::<Vec<_>>().join(", ")));
+            }
+            if parts.len() <= ids.is_some() as usize || arrow && ids.is_none() {
                 if let Some(ef) = ENGINE.functions.get(&name) {
                     parts.push(ef.hover_markdown(&name));
                 }
@@ -195,7 +203,7 @@ standard definition from `{}`", id, std.name, std.tlc));
                         String::new()
                     };
                     let note = if ty.is_empty() { "" } else { " - type at this point *(inferred)*" };
-                    return Some(format!("```c4script\nvar {}{}\n```\nlocal variable/parameter, line {}{}", name, ty, r.start.line + 1, note));
+                    return Some(format!("```c4script\nvar {}{}\n```\nlocal variable/parameter, line {}{}{}", name, ty, r.start.line + 1, note, ids_note(index, info, src, &node)));
                 }
             }
             let vars = index.visible_vars(info, &name);
@@ -216,7 +224,7 @@ standard definition from `{}`", id, std.name, std.tlc));
                 ),
                 None => (String::new(), String::new()),
             };
-            Some(format!("```c4script\n{} {}{}{}\n```\n`{}:{}`{}", kind, name, ty, value, f.path.display(), v.range.start.line + 1, note))
+            Some(format!("```c4script\n{} {}{}{}\n```\n`{}:{}`{}{}", kind, name, ty, value, f.path.display(), v.range.start.line + 1, note, ids_note(index, info, src, &node)))
         }
     }
 }
@@ -234,7 +242,8 @@ pub fn definition(index: &Index, info: &FileInfo, tree: &Tree, src: &str, pos: P
         None => return vec![],
     };
     match target {
-        Target::Call { name, arrow, .. } => call_targets(index, info, &name, arrow)
+        Target::Call { name, arrow, node } => call_targets(index, info, &name, arrow,
+                if arrow { super::objids::receiver_ids(index, info, src, &node) } else { None }.as_deref())
             .into_iter()
             .filter_map(|(f, d)| loc(&f.path, d.name_range))
             .collect(),
@@ -340,6 +349,14 @@ fn map_keys(scope: &Node, name: &str, src: &str, li: &LineIndex) -> Vec<Range> {
     }
     out.sort_by_key(|r| (r.start.line, r.start.character));
     out
+}
+
+/// "object of `FLNT`" when the definitions of the object a variable holds are known (objids.rs).
+fn ids_note(index: &Index, info: &FileInfo, src: &str, node: &Node) -> String {
+    match super::objids::ids_of(index, info, src, node) {
+        Some(ids) => format!("\n\nobject of {} *(inferred from its assignments)*", ids.iter().map(|i| format!("`{}`", i)).collect::<Vec<_>>().join(", ")),
+        None => String::new(),
+    }
 }
 
 fn enclosing_function<'t>(n: &Node<'t>) -> Option<Node<'t>> {

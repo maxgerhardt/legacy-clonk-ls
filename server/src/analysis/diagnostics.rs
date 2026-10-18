@@ -219,6 +219,35 @@ impl<'a> Ctx<'a> {
         let args = n.child_by_field_name("args").map(|a| named_children(&a).iter().filter(|c| c.kind() != "comment").count()).unwrap_or(0);
         let range = self.li.node_range(&name_node);
         if super::index::is_arrow_call(n) {
+            let failsafe = n.parent().map(|p| super::index::children(&p).iter().any(|c| c.kind() == "~")).unwrap_or(false);
+            // the receiver's definitions are known (obj = CreateObject(FLNT, ...)): the call reaches exactly their
+            // functions (+ global ones); none and no engine function = "Object call: No function" at runtime
+            if let Some(ids) = super::objids::receiver_ids(self.index, self.info, self.src, n) {
+                let funcs = super::objids::member_funcs(self.index, self.info, &ids, name);
+                let missing = funcs.is_empty() && !ENGINE.functions.contains_key(name);
+                if missing && !failsafe {
+                    self.out.push(diag(range, DiagnosticSeverity::WARNING, "member-call",
+                        format!("Object call: no function \"{}\" in {} (the object comes from {}; ->~{}() calls it only if it exists)",
+                            name, ids.join(" / "), if ids.len() == 1 { "this definition" } else { "one of these definitions" }, name)));
+                    return;
+                }
+                // missing with ->~F(): fine at runtime; the checks below still say whether any script defines F
+                if !missing {
+                    if funcs.is_empty() {
+                        if let Some(ef) = ENGINE.functions.get(name) {
+                            self.check_arg_types(n, name, &engine_params(ef), true, true);
+                        }
+                    } else {
+                        let params: Vec<Vec<(String, String)>> = funcs.iter()
+                            .map(|(_, f)| f.params.iter().map(|(t, n)| (t.clone().unwrap_or_default(), n.clone())).collect())
+                            .collect();
+                        if params.windows(2).all(|w| w[0] == w[1]) {
+                            self.check_arg_types(n, name, &params[0], false, false);
+                        }
+                    }
+                    return;
+                }
+            }
             // obj->EngineFunc(a, ...): the arguments fill the parameters from the first one on - the engine doesn't
             // put obj into a leading "object pObj" parameter (obj->MakeCrewMember(plr) passes plr as the object)
             if n.child_by_field_name("id").is_none() && self.index.reachable_funcs(&self.info.path, name).is_empty() {
@@ -612,6 +641,15 @@ pub static TYPE_CHECKS: std::sync::atomic::AtomicBool = std::sync::atomic::Atomi
 
 /// Infer the types of script variables (local/static) from all their assignments (needs type checks on).
 pub static FIELD_TYPES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Track which definitions objects are of (objids.rs) to resolve obj->F() calls (needs type checks on).
+pub static OBJECT_IDS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn object_ids_enabled() -> bool {
+    type_checks_enabled()
+        && OBJECT_IDS.load(std::sync::atomic::Ordering::Relaxed)
+        && std::env::var("C4LS_OBJECT_IDS").map(|v| v != "0").unwrap_or(true)
+}
 
 pub fn field_types_enabled() -> bool {
     type_checks_enabled()
