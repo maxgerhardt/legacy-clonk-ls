@@ -10,6 +10,9 @@ pub struct EngineParam {
     pub name: String,
     #[serde(rename = "type")]
     pub ty: String,
+    /// the type the engine converts the argument to (C++ signature, e.g. C4Value = any); `ty` is the documented one
+    #[serde(default)]
+    pub etype: String,
     #[serde(default)]
     pub desc: String,
 }
@@ -19,6 +22,9 @@ pub struct EngineFunc {
     pub params: Option<Vec<EngineParam>>,
     #[serde(default)]
     pub rtype: String,
+    /// return type from the C++ signature (any = C4Value)
+    #[serde(default)]
+    pub ertype: String,
     #[serde(default)]
     pub desc: String,
     #[serde(default)]

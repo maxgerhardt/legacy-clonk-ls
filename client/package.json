@@ -56,6 +56,11 @@
 				"legacy-clonk-ext.pathToGameExecutable": {
 					"type": "string",
 					"description": "Path to game executable, which is used to run scenarios"
+				},
+				"legacy-clonk-ext.typeChecks": {
+					"type": "boolean",
+					"default": true,
+					"description": "Report arguments whose type the engine can never convert (e.g. an object passed where a string is expected); they fail at runtime. Turn off if it reports false positives."
 				}
 			}
 		},

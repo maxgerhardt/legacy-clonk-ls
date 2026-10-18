@@ -348,6 +348,9 @@ impl LanguageServer for Backend {
                 game_dir = Some(std::path::PathBuf::from(g));
             }
             all_packs = opts.get("allPacks").and_then(|v| v.as_bool()).unwrap_or(false);
+            if let Some(tc) = opts.get("typeChecks").and_then(|v| v.as_bool()) {
+                legacy_clonk_ls::analysis::diagnostics::TYPE_CHECKS.store(tc, std::sync::atomic::Ordering::Relaxed);
+            }
         }
         if let Ok(mut g) = self.game.write() {
             *g = game_dir.map(|d| (d, all_packs));

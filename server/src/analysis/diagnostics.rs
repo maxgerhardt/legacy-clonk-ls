@@ -187,6 +187,13 @@ impl<'a> Ctx<'a> {
         let args = n.child_by_field_name("args").map(|a| named_children(&a).iter().filter(|c| c.kind() != "comment").count()).unwrap_or(0);
         let range = self.li.node_range(&name_node);
         if super::index::is_arrow_call(n) {
+            // obj->EngineFunc(a, ...): the arguments fill the parameters from the first one on - the engine doesn't
+            // put obj into a leading "object pObj" parameter (obj->MakeCrewMember(plr) passes plr as the object)
+            if n.child_by_field_name("id").is_none() && self.index.reachable_funcs(&self.info.path, name).is_empty() {
+                if let Some(ef) = ENGINE.functions.get(name) {
+                    self.check_arg_types(n, name, &engine_params(ef), true, true);
+                }
+            }
             // resolved at runtime, but the engine checks at compile time that some loaded script (or the engine)
             // has a function of that name: obj->F() without '~' is "direct object call: function F not found"
             // (C4AulParse: Engine->GetFirstFunc). ID::F() calls are checked differently: skip them.
@@ -207,11 +214,20 @@ impl<'a> Ctx<'a> {
         }
         // Script functions: the engine never checks their parameter count (GetParCount() is always 10).
         // A global func looks functions up in the engine only: global funcs, not this script's own or #include'd ones.
-        if self.in_global {
-            if !self.index.global_funcs(&self.info.path, name).is_empty() {
-                return;
+        let script_funcs = if self.in_global {
+            self.index.global_funcs(&self.info.path, name)
+        } else {
+            self.index.visible_funcs(self.info, name)
+        };
+        if !script_funcs.is_empty() {
+            // typed parameters of script functions are converted like the engine's (C4AulExec): checked when every
+            // definition the call could reach agrees on the type
+            let params: Vec<Vec<(String, String)>> = script_funcs.iter()
+                .map(|(_, f)| f.params.iter().map(|(t, n)| (t.clone().unwrap_or_default(), n.clone())).collect())
+                .collect();
+            if params.windows(2).all(|w| w[0] == w[1]) {
+                self.check_arg_types(n, name, &params[0], false, false);
             }
-        } else if !self.index.visible_funcs(self.info, name).is_empty() {
             return;
         }
         // Old scripts call constants like functions: COMD_Left() (only without #strict 2)
@@ -226,6 +242,7 @@ impl<'a> Ctx<'a> {
             if self.strict >= 3 {
                 self.check_literal_nothing(n, name, ef);
             }
+            self.check_arg_types(n, name, &engine_params(ef), false, true);
             if let (true, Some(ps)) = (ef.arity_known, &ef.params) {
                 if args > ps.len() {
                     self.out.push(diag(range, DiagnosticSeverity::WARNING, "too-many-params",
@@ -277,6 +294,67 @@ impl<'a> Ctx<'a> {
             self.out.push(diag(self.li.node_range(arg), DiagnosticSeverity::WARNING, "strict3-nothing",
                 format!("{}: parameter {} ({}) expects {}, but {} is {} in #strict 3 (not 'nothing'): pass nil instead; the call fails at runtime",
                     name, i + 1, p.name, p.ty, text, literal)));
+        }
+    }
+
+    /// Arguments whose type is certain and that the engine can never convert to the parameter's type: the call fails
+    /// at runtime ("call to "F" parameter N: got "object", but expected "string"!"; C4AulExec
+    /// CheckConvertFunctionParameters with C4Value::C4ScriptCnvMap, strict conversion). Below #strict 3 a falsy
+    /// value (0, false, nil) is passed as "nothing" (convertToAnyEagerly), so only values that are never falsy count
+    /// there; in #strict 3 int literals are left to strict3-nothing.
+    fn check_arg_types(&mut self, call: &Node, name: &str, params: &[(String, String)], arrow: bool, engine: bool) {
+        if !type_checks_enabled() {
+            return;
+        }
+        let Some(args) = call.child_by_field_name("args") else { return };
+        let args: Vec<Node> = named_children(&args).into_iter().filter(|c| c.kind() != "comment").collect();
+        for (i, (arg, (ty, pname))) in args.iter().zip(params.iter()).enumerate() {
+            let Some((got, truthy)) = self.static_type(arg) else { continue };
+            if !truthy && self.strict < 3 {
+                continue;
+            }
+            if self.strict >= 3 && engine && !arrow && matches!(arg.kind(), "number" | "bool") {
+                continue; // reported as strict3-nothing
+            }
+            if !never_converts(got, ty.as_str()) {
+                continue;
+            }
+            let hint = if arrow && i == 0 && ty == "object" {
+                format!(" (obj->{}(...) doesn't fill the object parameter: write {}(obj, ...))", name, name)
+            } else {
+                String::new()
+            };
+            self.out.push(diag(self.li.node_range(arg), DiagnosticSeverity::ERROR, "arg-type",
+                format!("call to \"{}\" parameter {}: got \"{}\", but expected \"{}\" ({}): fails at runtime{}",
+                    name, i + 1, got, ty, pname, hint)));
+            break; // the engine stops at the first parameter it can't convert
+        }
+    }
+
+    /// The type of an argument when it is certain, and whether the value can never be falsy.
+    fn static_type(&self, arg: &Node) -> Option<(&'static str, bool)> {
+        let text = node_text(arg, self.src);
+        match arg.kind() {
+            "string" => Some(("string", text.len() > 2)),
+            "number" => Some(("int", text.trim_start_matches("0x").trim_start_matches('0') != "")),
+            "bool" => Some(("bool", text == "true")),
+            "array" => Some(("array", true)),
+            "map" => Some(("map", true)),
+            // 4-character tokens: digits only (1000) is a number, the grammar lexes it as an ID
+            "id" if text.chars().all(|c| c.is_ascii_digit()) => Some(("int", text.trim_start_matches('0') != "")),
+            "id" => Some(("id", true)),
+            "identifier" if text == "this" => Some(("object", true)),
+            "method_call" => {
+                let name = node_text(&arg.child_by_field_name("name")?, self.src);
+                if name == "this" {
+                    return Some(("object", true));
+                }
+                if name == "Format" && !super::index::is_arrow_call(arg) && self.index.visible_funcs(self.info, name).is_empty() {
+                    return Some(("string", true));
+                }
+                None
+            }
+            _ => None,
         }
     }
 
@@ -448,4 +526,36 @@ fn function_locals(f: &Node, src: &str) -> HashSet<String> {
         stack.extend(named_children(&n));
     }
     out
+}
+
+/// C4Value::C4ScriptCnvMap: conversions that fail even in old scripts ("NEVER!", "Senseless") and the strict
+/// "#strict forbid" ones (engine parameters are always converted strictly).
+fn never_converts(from: &str, to: &str) -> bool {
+    match (from, to) {
+        (_, "any") | (_, "") => false,
+        (a, b) if a == b => false,
+        (_, "bool") => false,
+        ("int", "id") => false,
+        ("bool", "int") => false,
+        ("int" | "bool" | "id", "object" | "string" | "array" | "map") => true,
+        ("bool", "id") => true,
+        ("id" | "object" | "string", "int") => true,
+        ("object", "id" | "string" | "array" | "map") => true,
+        ("string", "id" | "object" | "array" | "map") => true,
+        ("array", _) | ("map", _) => true,
+        _ => false,
+    }
+}
+
+fn engine_params(ef: &super::engine::EngineFunc) -> Vec<(String, String)> {
+    // the engine converts to the C++ parameter type (C4Value = any), not the documented one
+    ef.params.iter().flatten().map(|p| (if p.etype.is_empty() { "any".to_string() } else { p.etype.clone() }, p.name.clone())).collect()
+}
+
+/// Type checks (arg-type) can be turned off: LSP initializationOptions `"typeChecks": false`, c4check
+/// `--no-type-checks`, or the environment variable C4LS_TYPE_CHECKS=0.
+pub static TYPE_CHECKS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn type_checks_enabled() -> bool {
+    TYPE_CHECKS.load(std::sync::atomic::Ordering::Relaxed) && std::env::var("C4LS_TYPE_CHECKS").map(|v| v != "0").unwrap_or(true)
 }

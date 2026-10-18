@@ -278,6 +278,7 @@ def main():
         if params is not None and d.get("params"):
             # engine gives count/types; docs give nicer names and descriptions
             for i, p in enumerate(params):
+                p["etype"] = p["type"]  # the type the engine converts to (C++ signature); "type" is the documented one
                 if i < len(d["params"]):
                     dp = d["params"][i]
                     p["name"] = dp["name"] or p["name"]
@@ -289,6 +290,7 @@ def main():
         out_funcs[name] = {
             "params": params,
             "rtype": d.get("rtype") or f["rtype"],
+            "ertype": f["rtype"],
             "desc": d.get("desc", ""),
             "remark": d.get("remark", ""),
             "version": d.get("version", ""),
