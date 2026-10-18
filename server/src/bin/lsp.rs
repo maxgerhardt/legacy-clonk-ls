@@ -417,6 +417,7 @@ impl LanguageServer for Backend {
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri;
+        legacy_clonk_ls::analysis::types::clear_cache(); // inferred return types may depend on this file
 
         if let Err(e) = self.change_document(&uri, params.content_changes[0].text.clone()) {
             tracing::error!("Error when updating text document ({:?}): {}", &uri, e);

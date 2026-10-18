@@ -39,7 +39,7 @@ pub fn diagnose(index: &Index, info: &FileInfo, src: &str, tree: &Tree) -> Vec<D
     }
     let unresolved_scope = index.has_unresolved_targets(info);
     let mut ctx = Ctx { index, info, src, li: &li, out: &mut out, locals: HashSet::new(), strict, func: None,
-        func_start: (0, 0), in_global: false, id_label_error: false, unresolved_scope };
+        func_start: (0, 0), in_global: false, id_label_error: false, unresolved_scope, types: None };
     ctx.walk(tree.root_node());
     // The engine doesn't report errors in System.c4g scripts that are pure #appendto scripts (C4AulParse Warn/
     // ParseFn: "do not show errors for System.c4g scripts that appear to be pure #appendto scripts"), but the
@@ -103,6 +103,8 @@ struct Ctx<'a> {
     id_label_error: bool,
     /// an #include/#appendto target of this script isn't indexed: its functions/locals are unknown
     unresolved_scope: bool,
+    /// inferred types of the function being walked (types.rs), when type checks are on
+    types: Option<super::types::FuncTypes>,
 }
 
 impl<'a> Ctx<'a> {
@@ -123,9 +125,13 @@ impl<'a> Ctx<'a> {
                 if let Some(name) = n.child_by_field_name("name") {
                     self.check_id_label(&name);
                 }
+                if type_checks_enabled() {
+                    self.types = Some(super::types::infer_function(self.index, self.info, self.src, n, self.strict));
+                }
                 for c in named_children(&n) {
                     self.walk(c);
                 }
+                self.types = None;
                 self.locals.clear();
                 self.func = None;
                 self.in_global = false;
@@ -309,10 +315,29 @@ impl<'a> Ctx<'a> {
         let Some(args) = call.child_by_field_name("args") else { return };
         let args: Vec<Node> = named_children(&args).into_iter().filter(|c| c.kind() != "comment").collect();
         for (i, (arg, (ty, pname))) in args.iter().zip(params.iter()).enumerate() {
-            let Some((got, truthy)) = self.static_type(arg) else { continue };
-            if !truthy && self.strict < 3 {
-                continue;
-            }
+            let got = match self.static_type(arg) {
+                Some((got, truthy)) => {
+                    if !truthy && self.strict < 3 {
+                        continue;
+                    }
+                    got.to_string()
+                }
+                None => {
+                    // inferred (types.rs): every possible type fails to convert, and none of them can be "nothing"
+                    // (nil converts to anything; below #strict 3 also 0, false and "" do)
+                    use super::types::*;
+                    let Some(t) = self.types.as_ref().and_then(|ft| ft.at.get(&arg.id()).copied()) else { continue };
+                    let maybe_falsy = if self.strict >= 3 { NIL } else { NIL | INT | BOOL | ID | STRING };
+                    if t == NONE || t == ANY || t & maybe_falsy != 0 {
+                        continue;
+                    }
+                    if !members(t).iter().all(|m| never_converts(m, ty.as_str())) {
+                        continue;
+                    }
+                    display(t)
+                }
+            };
+            let got = got.as_str();
             if self.strict >= 3 && engine && !arrow && matches!(arg.kind(), "number" | "bool") {
                 continue; // reported as strict3-nothing
             }
@@ -531,6 +556,9 @@ fn function_locals(f: &Node, src: &str) -> HashSet<String> {
 /// C4Value::C4ScriptCnvMap: conversions that fail even in old scripts ("NEVER!", "Senseless") and the strict
 /// "#strict forbid" ones (engine parameters are always converted strictly).
 fn never_converts(from: &str, to: &str) -> bool {
+    if to.contains('&') {
+        return false; // reference parameters (SetLength(&array, ...)): checked differently by the engine
+    }
     match (from, to) {
         (_, "any") | (_, "") => false,
         (a, b) if a == b => false,

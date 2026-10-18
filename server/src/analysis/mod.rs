@@ -5,3 +5,4 @@ pub mod engine;
 pub mod index;
 pub mod query;
 pub mod text;
+pub mod types;

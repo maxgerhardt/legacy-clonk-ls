@@ -81,7 +81,7 @@ fn call_targets<'a>(index: &'a Index, info: &'a FileInfo, name: &str, arrow: boo
 pub fn hover(index: &Index, info: &FileInfo, tree: &Tree, src: &str, pos: Position) -> Option<String> {
     let li = LineIndex::new(src);
     match target_at(tree, src, &li, pos)? {
-        Target::Call { name, arrow, .. } => {
+        Target::Call { name, arrow, node } => {
             let defs = call_targets(index, info, &name, arrow);
             let mut parts: Vec<String> = defs.iter().take(5).map(|(f, d)| func_markdown(f, d, index)).collect();
             if defs.len() > 5 {
@@ -95,10 +95,20 @@ pub fn hover(index: &Index, info: &FileInfo, tree: &Tree, src: &str, pos: Positi
             if parts.is_empty() {
                 return None;
             }
+            if super::diagnostics::type_checks_enabled() {
+                if let Some(t) = super::types::type_at(index, info, src, &tree.root_node(), &node) {
+                    parts.push(format!("returns `{}` here *(inferred)*", super::types::display(t)));
+                }
+            }
             Some(parts.join("\n\n---\n\n"))
         }
         Target::FuncDef { name } => {
             let mut s = String::new();
+            if super::diagnostics::type_checks_enabled() {
+                if let Some(f) = info.funcs.iter().find(|f| f.name == name) {
+                    s = format!("returns `{}` *(inferred from its return statements)*", super::types::display(super::types::script_return(index, info, f)));
+                }
+            }
             if let Some(ef) = ENGINE.functions.get(&name) {
                 s = format!("Overrides/shadows the engine function:\n\n{}", ef.hover_markdown(&name));
             }
@@ -146,7 +156,15 @@ standard definition from `{}`", id, std.name, std.tlc));
             }
             if let Some(func) = enclosing_function(&node) {
                 if let Some(r) = local_declaration(&func, &name, src, &li) {
-                    return Some(format!("```c4script\nvar {}\n```\nlocal variable/parameter, line {}", name, r.start.line + 1));
+                    let ty = if super::diagnostics::type_checks_enabled() {
+                        super::types::type_at(index, info, src, &tree.root_node(), &node)
+                            .map(|t| format!(": {}", super::types::display(t)))
+                            .unwrap_or_default()
+                    } else {
+                        String::new()
+                    };
+                    let note = if ty.is_empty() { "" } else { " - type at this point *(inferred)*" };
+                    return Some(format!("```c4script\nvar {}{}\n```\nlocal variable/parameter, line {}{}", name, ty, r.start.line + 1, note));
                 }
             }
             let vars = index.visible_vars(info, &name);

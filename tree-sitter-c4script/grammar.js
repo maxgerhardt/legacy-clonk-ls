@@ -289,13 +289,14 @@ module.exports = grammar({
         ),
 
         // '?' = nil-safe navigation (#strict 3): obj?->Foo(), map?.key, arr?[i]
-        arrow_expression: $ => seq(
+        // postfix operators bind tighter than unary and binary ones (C4AulParse: x = a->F() is x = (a->F()))
+        arrow_expression: $ => prec.left(18, seq(
             $._expression,
             optional('?'),
             '->',
             optional('~'),
             $.method_call,
-        ),
+        )),
 
         // NO_OWNER is an engine constant (an identifier): old scripts call constants like functions, NO_OWNER()
         builtin_constant: $ => choice(
@@ -396,13 +397,14 @@ module.exports = grammar({
             $.string,
         ),
 
-        map_access: $ => choice(
+        // postfix: i = [1, 2][k] is i = ([1, 2][k])
+        map_access: $ => prec.left(18, choice(
             seq($._expression, optional('?'), '.', $.identifier),
             seq($._expression, optional('?'), '[', $._expression, ']'),
-        ),
+        )),
 
         // arr[] = x appends (any #strict level, C4AulParse AB_ARRAY_APPEND)
-        array_append: $ => prec(2, seq($._expression, '[', ']')),
+        array_append: $ => prec.left(18, seq($._expression, '[', ']')),
 
         // one token: otherwise "// ..." inside a string is lexed as a comment (extras) between '"' and the content
         string: $ => token(seq(
