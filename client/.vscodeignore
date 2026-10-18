@@ -5,7 +5,6 @@
 !client/out/lsp-*
 !icon.png
 !icons/
-!themes/
+!themes/*.json
 !c4script-language-configuration.json
 !c4ini-language-configuration.json
-themes/*.py

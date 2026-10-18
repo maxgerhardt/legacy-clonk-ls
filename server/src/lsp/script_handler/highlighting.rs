@@ -307,6 +307,10 @@ impl Highlighter {
                         let text = &src.text[node.start_byte()..node.end_byte()];
                         if text == "this" {
                             Self::add_token(ctx, ctx.token_types.this_kw, &node);
+                        } else if is_map_key(&node) {
+                            // map keys {speed = 5} and m.speed: properties, like JavaScript object keys - never the
+                            // local variable of the same name
+                            Self::add_token(ctx, ctx.token_types.property, &node);
                         } else if src.params.borrow().contains(text) {
                             Self::add_token(ctx, ctx.token_types.parameter, &node);
                         } else if src.locals.borrow().contains(text) {
@@ -459,6 +463,18 @@ fn function_names(func: &Node, src: &str) -> (HashSet<String>, HashSet<String>) 
         stack.extend(n.named_children(&mut c));
     }
     (params, locals)
+}
+
+/// the key of a map entry ({speed = 5}) or of a map access with '.' (m.speed)
+fn is_map_key(node: &Node) -> bool {
+    match node.parent() {
+        Some(p) if p.kind() == "map_key" => true,
+        Some(p) if p.kind() == "map_access" => {
+            // m.speed: the identifier right after the '.' (not m[speed], where speed is an expression)
+            node.prev_sibling().map(|s| s.kind() == ".").unwrap_or(false)
+        }
+        _ => false,
+    }
 }
 
 /// an engine function (not overridden by a function of this script): semantic modifier defaultLibrary
@@ -651,6 +667,21 @@ mod tests {
         let calls: Vec<u32> = tokens.iter().filter(|t| t.token_type == 60).map(|t| t.token_modifiers_bitset).collect();
         // Mine (definition), f (definition), Mine() call, GetX() call
         assert_eq!(calls, vec![0, 0, 0, 1]);
+    }
+
+    #[test]
+    fn map_keys_are_properties_like_js_objects() {
+        let mut parser = Parser::new();
+        parser.set_language(tree_sitter_c4script::language()).expect("Loading c4scrpt grammar");
+        // speed is also a local variable (declared later): the key and the .speed access stay properties
+        let src = "#strict 3
+func f() { var m = {speed = 5, name = 1}; var speed = m.speed; return speed; }";
+        let tree = parser.parse(src, None).unwrap();
+        let lut = TokenTypes { variable: 70, property: 71, ..TokenTypes::default() };
+        let tokens = Highlighter::collect_tokens_with_source(&tree, lut, src);
+        let n = |t: u32| tokens.iter().filter(|x| x.token_type == t).count();
+        assert_eq!(n(71), 3, "keys speed, name and the .speed access");
+        assert_eq!(n(70), 4, "m (2x), speed (declaration + return)");
     }
 
     #[test]
