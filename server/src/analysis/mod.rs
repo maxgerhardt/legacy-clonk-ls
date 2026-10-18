@@ -7,6 +7,7 @@ pub mod engine;
 pub mod format;
 pub mod index;
 pub mod ini;
+pub mod lint;
 pub mod objids;
 pub mod query;
 pub mod strings;

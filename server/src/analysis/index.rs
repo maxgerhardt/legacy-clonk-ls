@@ -212,6 +212,9 @@ pub struct Index {
     pub covered: Vec<PathBuf>,
     /// Name tables for fast lookups, built on first use and reset by every change of `files`
     lookup: std::sync::OnceLock<Lookup>,
+    /// scope_files results ("<script>|<#include/#appendto lines>" -> file keys after the script itself); reset with
+    /// `lookup`. The type inference asks for the same script's scope thousands of times.
+    scope_cache: std::sync::Mutex<HashMap<String, Vec<String>>>,
 }
 
 /// Name -> (file key, index into FileInfo::funcs/vars) tables, so lookups don't scan all files.
@@ -614,6 +617,15 @@ pub fn extract(path: &Path, src: &str, tree: &Tree) -> FileInfo {
             }
             "id" => info.id_refs.push((node_text(&n, src).to_string(), li.node_range(&n))),
             // names in strings may be called by name (Schedule("F()"), Call("F"), menus, commands): callers.rs
+            // [Desc|Condition=Func]: the engine evaluates Func on the object (context menu entries)
+            "func_desc" => {
+                let text = node_text(&n, src);
+                for part in text.split('|') {
+                    if let Some(f) = part.trim().strip_prefix("Condition=") {
+                        info.own_string_words.insert(f.trim_end_matches(']').trim().to_string());
+                    }
+                }
+            }
             "string" if !string_may_call(&n, src) => {}
             "string" => {
                 let text = node_text(&n, src);
@@ -782,6 +794,7 @@ impl Index {
             self.files.insert(key, info);
         }
         self.lookup = std::sync::OnceLock::new();
+        self.scope_cache = Default::default();
         if std::env::var_os("C4LS_TIMING").is_some() {
             eprintln!("[timing] DefCore+Scenario.txt {:?}, scripts {:?}", t_meta, t.elapsed() - t_meta);
         }
@@ -948,6 +961,7 @@ impl Index {
             self.files.entry(k).or_insert(f);
         }
         self.lookup = std::sync::OnceLock::new();
+        self.scope_cache = Default::default();
         for (k, v) in other.ids {
             let list = self.ids.entry(k).or_default();
             for i in v {
@@ -980,6 +994,7 @@ impl Index {
     pub fn update_file(&mut self, info: FileInfo) {
         self.files.insert(path_key(&info.path), info);
         self.lookup = std::sync::OnceLock::new();
+        self.scope_cache = Default::default();
     }
 
     fn lookup(&self) -> &Lookup {
@@ -1019,6 +1034,21 @@ impl Index {
     /// Files whose functions/locals are visible from `info`: itself, its #include chain,
     /// #appendto scripts of those definitions, and (for an #appendto script) its target.
     pub fn scope_files<'a>(&'a self, info: &'a FileInfo) -> Vec<&'a FileInfo> {
+        // the open document may differ from its indexed version: its own #include/#appendto lines are in the key
+        let key = format!("{}|{}|{}", path_key(&info.path), info.includes.join(","), info.appendto.join(","));
+        if let Some(keys) = self.scope_cache.lock().ok().and_then(|c| c.get(&key).cloned()) {
+            let mut out = vec![info];
+            out.extend(keys.iter().filter_map(|k| self.files.get(k)));
+            return out;
+        }
+        let out = self.scope_files_uncached(info);
+        if let Ok(mut c) = self.scope_cache.lock() {
+            c.insert(key, out.iter().skip(1).map(|f| path_key(&f.path)).collect());
+        }
+        out
+    }
+
+    fn scope_files_uncached<'a>(&'a self, info: &'a FileInfo) -> Vec<&'a FileInfo> {
         let mut out: Vec<&FileInfo> = vec![];
         let mut seen = HashSet::new();
         let mut todo = vec![info];
@@ -1060,6 +1090,11 @@ impl Index {
     /// (GameCall, ObjectCall, "obj->F()", menus, effects, ...) anywhere, an own-object call (Schedule("F()"),
     /// ScheduleCall(this, "F"), ...) in its definition family, or a Format("Name%d") prefix.
     pub fn named_in_strings(&self, file: &FileInfo, name: &str) -> bool {
+        self.named_in_strings_of(file, None, name)
+    }
+
+    /// named_in_strings with the family of `file` already at hand.
+    pub fn named_in_strings_of(&self, file: &FileInfo, family: Option<&[&FileInfo]>, name: &str) -> bool {
         let l = self.lookup();
         if l.string_words.contains(name) || l.string_prefixes.iter().any(|p| p.len() >= 3 && name.starts_with(p.as_str())) {
             return true;
@@ -1067,7 +1102,10 @@ impl Index {
         if file.own_string_words.contains(name) {
             return true;
         }
-        self.family(file).iter().any(|f| f.own_string_words.contains(name))
+        match family {
+            Some(fam) => fam.iter().any(|f| f.own_string_words.contains(name)),
+            None => self.family(file).iter().any(|f| f.own_string_words.contains(name)),
+        }
     }
 
     /// How ActMap/DefCore files call a function: (script next to the file, key like "PhaseCall", procedure).

@@ -199,6 +199,12 @@ fn ref_untouched(name: &str) -> String {
     format!("\u{1}u:{}", name)
 }
 
+/// What one function writes to script variables (FuncTypes::writes / member_writes).
+pub struct Writes {
+    writes: HashMap<String, Ty>,
+    member_writes: HashMap<String, Vec<(Option<String>, Ty)>>,
+}
+
 /// Inferred type of a script variable.
 #[derive(Clone, Copy, Debug)]
 pub struct FieldType {
@@ -214,6 +220,8 @@ lazy_static::lazy_static! {
     static ref REF_SUMMARIES: Mutex<HashMap<String, Vec<(Ty, bool)>>> = Mutex::new(HashMap::new());
     /// script variable types: "local|<def script>|name" / "static|name" -> (type, assignments, scripts)
     static ref FIELDS: Mutex<HashMap<String, FieldType>> = Mutex::new(HashMap::new());
+    /// what a function writes to script variables (FuncTypes::writes/member_writes), by "<script>|func|line|depth"
+    static ref WRITES: Mutex<HashMap<String, Arc<Writes>>> = Mutex::new(HashMap::new());
     static ref IN_PROGRESS: Mutex<HashSet<String>> = Mutex::new(HashSet::new());
     /// parsed scripts whose functions were summarised (source, tree)
     static ref TREES: Mutex<HashMap<String, Arc<(String, Tree)>>> = Mutex::new(HashMap::new());
@@ -234,6 +242,9 @@ pub fn clear_cache() {
         s.clear();
     }
     if let Ok(mut s) = FIELDS.lock() {
+        s.clear();
+    }
+    if let Ok(mut s) = WRITES.lock() {
         s.clear();
     }
     super::objids::clear_cache();
@@ -1085,6 +1096,22 @@ impl<'a> Infer<'a> {
     }
 
     /// Analyse function number `i` of `file` (from disk, or the open document's text).
+    /// The script-variable writes of function `i` of `file` (cached: a function writing several fields is
+    /// inferred once, not once per field).
+    fn writes_of(&self, file: &FileInfo, i: usize) -> Option<Arc<Writes>> {
+        let f = file.funcs.get(i)?;
+        let key = format!("{}|{}|{}|{}", path_key(&file.path), f.name, f.name_range.start.line, self.depth);
+        if let Some(w) = WRITES.lock().ok().and_then(|m| m.get(&key).cloned()) {
+            return Some(w);
+        }
+        let ft = self.infer_other(file, i)?;
+        let w = Arc::new(Writes { writes: ft.writes, member_writes: ft.member_writes });
+        if let Ok(mut m) = WRITES.lock() {
+            m.insert(key, w.clone());
+        }
+        Some(w)
+    }
+
     fn infer_other(&self, file: &FileInfo, i: usize) -> Option<FuncTypes> {
         let f = file.funcs.get(i)?;
         let current_key = path_key(&self.info.path);
@@ -1165,7 +1192,7 @@ impl<'a> Infer<'a> {
             } else if !is_local {
                 continue;
             }
-            let Some(ft) = self.infer_other(f, i) else { continue };
+            let Some(ft) = self.writes_of(f, i) else { continue };
             let t = if member {
                 ft.member_writes.get(name).into_iter().flatten()
                     .filter(|(def, _)| def.as_deref().map_or(true, |d| family_ids.contains(d)))

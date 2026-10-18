@@ -110,6 +110,11 @@
 					"default": false,
 					"description": "Advanced, slower (the check takes about 3x as long): infer what a function's callers guarantee. A private/protected function whose name never appears in a string (Schedule, Call, ActMap, DefCore) gets its parameter types from all its call sites, and starts with Contained()/GetActionTarget()/... known to be set when every caller checked it. The engine's own guarantees (Entrance, Collection2, Contained<Com>, PhaseCall of PUSH/ATTACH/... actions, InitializePlayer crew) apply without it. Needs typeChecks."
 				},
+				"legacy-clonk-ext.lint": {
+					"type": "boolean",
+					"default": true,
+					"description": "Lint warnings the engine doesn't give: unused variables (unused-var), private functions nothing calls (unused-func), code after return/break/continue (unreachable); shown faded. Silence one with // NOLINT(code) (quick fix), // NOLINTNEXTLINE(code), // c4lint: ignore-file(code)."
+				},
 				"legacy-clonk-ext.nilChecks": {
 					"type": "boolean",
 					"default": false,

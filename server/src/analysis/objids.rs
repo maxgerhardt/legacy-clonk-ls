@@ -603,7 +603,7 @@ pub(crate) fn assigned_values<'t>(func: &Node<'t>, name: &str, src: &str, script
 /// Whether a statement always leaves the code after it (return/break/continue, a block ending in one, an
 /// if/else whose branches both leave).
 fn exits(s: &Node) -> bool {
-    let named: Vec<Node> = named_children(s).into_iter().filter(|c| c.kind() != "comment").collect();
+    let named: Vec<Node> = named_children(s).into_iter().filter(|c| !matches!(c.kind(), "comment" | "else")).collect();
     match s.kind() {
         "return_statement" | "flow_control_statement" => true,
         "block" => named.last().map(exits).unwrap_or(false),

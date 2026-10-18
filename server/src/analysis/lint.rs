@@ -1,0 +1,251 @@
+//! Lint checks the engine doesn't make (unused variables and functions, unreachable code) and suppression comments.
+//!
+//! Suppression (clang-tidy style, also our own spelling), in line or block comments, optionally with codes:
+//! `// NOLINT`, `// NOLINT(nil-call, unused-var)`: this line; `// NOLINTNEXTLINE(...)`: the next line;
+//! `// c4lint: ignore(...)`, `// c4lint: ignore-next-line(...)`, `// c4lint: ignore-file(...)`. No codes = all.
+
+use super::index::{children, named_children, path_key, FileInfo, Index};
+use super::text::{node_text, LineIndex};
+use std::collections::{HashMap, HashSet};
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString};
+use tree_sitter::Node;
+
+/// Codes suppressed per line (None = all codes), and for the whole file.
+#[derive(Default)]
+pub struct Suppressions {
+    lines: HashMap<u32, Option<HashSet<String>>>,
+    file: Option<Option<HashSet<String>>>,
+}
+
+fn merge(a: &mut Option<HashSet<String>>, b: Option<HashSet<String>>) {
+    match (a.as_mut(), b) {
+        (Some(x), Some(y)) => x.extend(y),
+        _ => *a = None,
+    }
+}
+
+/// `(a, b)` after a marker: the codes; nothing: all.
+fn codes(rest: &str) -> Option<HashSet<String>> {
+    let rest = rest.trim_start();
+    let inner = rest.strip_prefix('(')?.split(')').next()?;
+    let set: HashSet<String> = inner.split(',').map(|c| c.trim().to_string()).filter(|c| !c.is_empty()).collect();
+    (!set.is_empty() && !set.contains("all")).then_some(set)
+}
+
+pub fn suppressions(root: &Node, src: &str) -> Suppressions {
+    let mut out = Suppressions::default();
+    let mut stack = vec![*root];
+    while let Some(n) = stack.pop() {
+        if n.kind() == "comment" {
+            let text = node_text(&n, src);
+            let (start, end) = (n.start_position().row as u32, n.end_position().row as u32);
+            let mut add = |line: u32, c: Option<HashSet<String>>| match out.lines.get_mut(&line) {
+                Some(e) => merge(e, c),
+                None => {
+                    out.lines.insert(line, c);
+                }
+            };
+            if let Some(i) = text.find("NOLINTNEXTLINE") {
+                add(end + 1, codes(&text[i + 14..]));
+            } else if let Some(i) = text.find("NOLINT") {
+                let c = codes(&text[i + 6..]);
+                add(start, c.clone());
+                add(end, c);
+            }
+            if let Some(i) = text.find("c4lint:") {
+                let rest = text[i + 7..].trim_start();
+                if let Some(r) = rest.strip_prefix("ignore-next-line") {
+                    add(end + 1, codes(r));
+                } else if let Some(r) = rest.strip_prefix("ignore-file") {
+                    match out.file.as_mut() {
+                        Some(e) => merge(e, codes(r)),
+                        None => out.file = Some(codes(r)),
+                    }
+                } else if let Some(r) = rest.strip_prefix("ignore") {
+                    let c = codes(r);
+                    add(start, c.clone());
+                    add(end, c);
+                }
+            }
+        }
+        stack.extend(named_children(&n));
+    }
+    out
+}
+
+impl Suppressions {
+    pub fn hides(&self, d: &Diagnostic) -> bool {
+        let code = match &d.code {
+            Some(NumberOrString::String(s)) => s.as_str(),
+            _ => "",
+        };
+        let covers = |c: &Option<HashSet<String>>| c.as_ref().map(|s| s.contains(code)).unwrap_or(true);
+        self.file.as_ref().map(covers).unwrap_or(false) || self.lines.get(&d.range.start.line).map(covers).unwrap_or(false)
+    }
+}
+
+fn diag(range: tower_lsp::lsp_types::Range, sev: DiagnosticSeverity, code: &str, msg: String) -> Diagnostic {
+    Diagnostic {
+        range,
+        severity: Some(sev),
+        code: Some(NumberOrString::String(code.to_string())),
+        source: Some("c4script".to_string()),
+        message: msg,
+        // shown faded (unused/unreachable)
+        tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+        ..Default::default()
+    }
+}
+
+fn op(n: &Node) -> String {
+    children(n).iter().find(|c| !c.is_named() && !matches!(c.kind(), "(" | ")")).map(|c| c.kind().to_string()).unwrap_or_default()
+}
+
+/// unused-var: a `var` of a function that is never read (plain `x = ...` assignments aren't reads).
+pub fn unused_vars(root: &Node, src: &str, li: &LineIndex, out: &mut Vec<Diagnostic>) {
+    let mut stack = vec![*root];
+    while let Some(n) = stack.pop() {
+        if n.kind() == "function_definition" {
+            check_function_vars(&n, src, li, out);
+            continue;
+        }
+        stack.extend(named_children(&n));
+    }
+}
+
+fn check_function_vars(func: &Node, src: &str, li: &LineIndex, out: &mut Vec<Diagnostic>) {
+    // declarations (first one per name) and every identifier use
+    let mut decls: Vec<(String, Node)> = vec![];
+    let mut loop_vars: HashSet<String> = HashSet::new();
+    let mut reads: HashSet<String> = HashSet::new();
+    let mut assigned: HashSet<String> = HashSet::new();
+    let mut by_index = false;
+    let mut stack = vec![*func];
+    while let Some(n) = stack.pop() {
+        match n.kind() {
+            "var_assignment" => {
+                let is_var = n.parent().map(|p| named_children(&p).iter().any(|c| c.kind() == "var_scope" && node_text(c, src) == "var")).unwrap_or(false);
+                let nc = named_children(&n);
+                if let (true, Some(id)) = (is_var, nc.first()) {
+                    let name = node_text(id, src).to_string();
+                    if !decls.iter().any(|(d, _)| *d == name) {
+                        decls.push((name, *id));
+                    }
+                    // the initial value is read as usual
+                    stack.extend(nc.into_iter().skip(1));
+                    continue;
+                }
+            }
+            "for_statement" => {
+                for v in super::index::for_in_vars(&n) {
+                    loop_vars.insert(node_text(&v, src).to_string());
+                }
+            }
+            "method_call" if n.child_by_field_name("name").map(|x| node_text(&x, src) == "Var").unwrap_or(false) => by_index = true,
+            "binary_expression" if op(&n) == "=" => {
+                let nc: Vec<Node> = named_children(&n).into_iter().filter(|c| c.kind() != "comment").collect();
+                if let Some(l) = nc.first().filter(|l| l.kind() == "identifier") {
+                    assigned.insert(node_text(l, src).to_string());
+                    stack.extend(nc.into_iter().skip(1));
+                    continue;
+                }
+            }
+            "identifier" => {
+                reads.insert(node_text(&n, src).to_string());
+            }
+            _ => {}
+        }
+        stack.extend(named_children(&n));
+    }
+    if by_index {
+        return; // Var(n) reads variables by their index
+    }
+    for (name, id) in decls {
+        if name.starts_with('_') || loop_vars.contains(&name) || reads.contains(&name) {
+            continue;
+        }
+        let what = if assigned.contains(&name) { "is assigned but never read" } else { "is never used" };
+        out.push(diag(li.node_range(&id), DiagnosticSeverity::WARNING, "unused-var",
+            format!("variable \"{}\" {} (remove it, or name it _{} to keep it)", name, what, name)));
+    }
+}
+
+/// Whether a statement always leaves the code after it: return, break/continue, a block ending in one, an if/else
+/// whose branches both leave.
+fn exits(s: &Node) -> bool {
+    let named: Vec<Node> = named_children(s).into_iter().filter(|c| !matches!(c.kind(), "comment" | "else")).collect();
+    match s.kind() {
+        "return_statement" | "flow_control_statement" => true,
+        "block" => named.last().map(exits).unwrap_or(false),
+        "if_statement" => children(s).iter().any(|c| c.kind() == "else") && named.len() == 3 && exits(&named[1]) && exits(&named[2]),
+        _ => false,
+    }
+}
+
+/// unreachable: statements after one that always leaves its block.
+pub fn unreachable(root: &Node, li: &LineIndex, out: &mut Vec<Diagnostic>) {
+    let mut stack = vec![*root];
+    while let Some(n) = stack.pop() {
+        if n.kind() == "old_function_definition" {
+            continue; // old-style labels: the next label starts a new function
+        }
+        if n.kind() == "block" {
+            let stmts: Vec<Node> = named_children(&n).into_iter().filter(|c| c.kind() != "comment").collect();
+            if let Some(i) = stmts.iter().position(exits) {
+                if let (Some(first), Some(last)) = (stmts.get(i + 1), stmts.last()) {
+                    let range = tower_lsp::lsp_types::Range::new(li.node_range(first).start, li.node_range(last).end);
+                    let after = match stmts[i].kind() {
+                        "return_statement" => "it comes after a return",
+                        "flow_control_statement" => "it comes after break/continue",
+                        _ => "both branches of the if/else before it leave",
+                    };
+                    out.push(diag(range, DiagnosticSeverity::WARNING, "unreachable", format!("unreachable code: {}", after)));
+                }
+            }
+        }
+        stack.extend(named_children(&n));
+    }
+}
+
+/// unused-func: a private function nothing calls: no call by name in any script (the
+/// open one included), not an engine callback, in no string that may call it, in no ActMap/DefCore *Call=, and no
+/// same-named function in its definition family (an overload chain is called through the name).
+pub fn unused_funcs(index: &Index, info: &FileInfo, out: &mut Vec<Diagnostic>) {
+    let current = path_key(&info.path);
+    let mut family: Option<Vec<&FileInfo>> = None;
+    for f in &info.funcs {
+        // protected/public functions may be called by the engine or other objects in ways we can't see
+        let level = match f.visibility.as_deref() {
+            Some("private") => DiagnosticSeverity::WARNING,
+            _ => continue,
+        };
+        if super::callers::is_callback(&f.name) || info.calls.iter().any(|c| c.name == f.name) {
+            continue;
+        }
+        if index.call_sites(&f.name).iter().any(|(cf, _)| path_key(&cf.path) != current) {
+            continue;
+        }
+        if !index.ini_uses(&f.name).is_empty() || info.ini_calls.iter().any(|(n, _, _)| *n == f.name) {
+            continue;
+        }
+        if info.string_words.contains(&f.name) || info.own_string_words.contains(&f.name) {
+            continue;
+        }
+        let fam = family.get_or_insert_with(|| index.family(info));
+        if index.named_in_strings_of(info, Some(fam), &f.name) {
+            continue;
+        }
+        if fam.iter().any(|g| path_key(&g.path) != current && g.funcs.iter().any(|d| d.name == f.name)) {
+            continue;
+        }
+        if info.funcs.iter().filter(|d| d.name == f.name).count() > 1 {
+            continue;
+        }
+        let msg = if level == DiagnosticSeverity::WARNING {
+            format!("private function \"{}\" is never called (no script calls it, no string or ActMap names it)", f.name)
+        } else {
+            format!("protected function \"{}\" is never called by a script and isn't a known engine callback", f.name)
+        };
+        out.push(diag(f.name_range, level, "unused-func", msg));
+    }
+}

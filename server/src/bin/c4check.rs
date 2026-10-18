@@ -1,6 +1,6 @@
 //! Command-line checker: index the roots and print diagnostics for C4Script files.
 //!
-//! Usage: c4check [--root DIR]... [--game-dir DIR] [--all-packs] [--no-type-checks] [--no-field-types] [--no-object-ids] [--nil-checks] [--create-may-fail] [--caller-inference] [--languages DE,US] [--errors-only] [PATH]...
+//! Usage: c4check [--root DIR]... [--game-dir DIR] [--all-packs] [--no-type-checks] [--no-field-types] [--no-object-ids] [--no-lint] [--nil-checks] [--create-may-fail] [--caller-inference] [--languages DE,US] [--errors-only] [PATH]...
 //!   --root DIR     folder to index (repeatable; default: current directory)
 //!   --game-dir DIR game folder (default: env C4LS_GAME_DIR): its Objects.c4d and the packs the scenarios
 //!                  name in [Definitions] are indexed too (packed groups are unpacked once into a cache)
@@ -32,9 +32,10 @@ fn main() {
             "--no-object-ids" => legacy_clonk_ls::analysis::diagnostics::OBJECT_IDS.store(false, std::sync::atomic::Ordering::Relaxed),
             "--create-may-fail" => legacy_clonk_ls::analysis::diagnostics::ASSUME_CREATE.store(false, std::sync::atomic::Ordering::Relaxed),
             "--caller-inference" => legacy_clonk_ls::analysis::diagnostics::CALLER_INFERENCE.store(true, std::sync::atomic::Ordering::Relaxed),
+            "--no-lint" => legacy_clonk_ls::analysis::diagnostics::LINT.store(false, std::sync::atomic::Ordering::Relaxed),
             "--nil-checks" => legacy_clonk_ls::analysis::diagnostics::NIL_CHECKS.store(true, std::sync::atomic::Ordering::Relaxed),
             "-h" | "--help" => {
-                eprintln!("usage: c4check [--root DIR]... [--game-dir DIR] [--all-packs] [--no-type-checks] [--no-field-types] [--no-object-ids] [--nil-checks] [--create-may-fail] [--caller-inference] [--languages DE,US] [--errors-only] [PATH]...");
+                eprintln!("usage: c4check [--root DIR]... [--game-dir DIR] [--all-packs] [--no-type-checks] [--no-field-types] [--no-object-ids] [--no-lint] [--nil-checks] [--create-may-fail] [--caller-inference] [--languages DE,US] [--errors-only] [PATH]...");
                 return;
             }
             _ => targets.push(PathBuf::from(a)),

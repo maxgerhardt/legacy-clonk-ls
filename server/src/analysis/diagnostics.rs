@@ -42,6 +42,13 @@ pub fn diagnose(index: &Index, info: &FileInfo, src: &str, tree: &Tree) -> Vec<D
         func_start: (0, 0), in_global: false, id_label_error: false, unresolved_scope, types: None };
     ctx.walk(tree.root_node());
     check_string_table(info, src, &li, &mut out);
+    // lint-only checks (lint.rs): unused vars/functions, unreachable code
+    if lint_enabled() {
+        let root = tree.root_node();
+        super::lint::unused_vars(&root, src, &li, &mut out);
+        super::lint::unreachable(&root, &li, &mut out);
+        super::lint::unused_funcs(index, info, &mut out);
+    }
     // The engine doesn't report errors in System.c4g scripts that are pure #appendto scripts (C4AulParse Warn/
     // ParseFn: "do not show errors for System.c4g scripts that appear to be pure #appendto scripts"), but the
     // broken function still isn't compiled: report them as warnings.
@@ -51,7 +58,18 @@ pub fn diagnose(index: &Index, info: &FileInfo, src: &str, tree: &Tree) -> Vec<D
             d.message.push_str(" (System.c4g #appendto script: the engine hides this error, but the function isn't compiled)");
         }
     }
+    // NOLINT / c4lint: ignore comments
+    let sup = super::lint::suppressions(&tree.root_node(), src);
+    out.retain(|d| !sup.hides(d));
     out
+}
+
+/// Unused variables/functions and unreachable code (lint.rs). Off: `.lsp.json` / VS Code `lint: false`,
+/// `c4check --no-lint`, env C4LS_LINT=0.
+pub static LINT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn lint_enabled() -> bool {
+    LINT.load(std::sync::atomic::Ordering::Relaxed) && std::env::var("C4LS_LINT").map(|v| v != "0").unwrap_or(true)
 }
 
 /// `$Name$` references: the engine warns "string table entry not found" when the table (StringTbl.txt /

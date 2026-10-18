@@ -416,6 +416,9 @@ impl LanguageServer for Backend {
             if let Some(ci) = opts.get("callerInference").and_then(|v| v.as_bool()) {
                 legacy_clonk_ls::analysis::diagnostics::CALLER_INFERENCE.store(ci, std::sync::atomic::Ordering::Relaxed);
             }
+            if let Some(l) = opts.get("lint").and_then(|v| v.as_bool()) {
+                legacy_clonk_ls::analysis::diagnostics::LINT.store(l, std::sync::atomic::Ordering::Relaxed);
+            }
             if let Some(nc) = opts.get("nilChecks").and_then(|v| v.as_bool()) {
                 legacy_clonk_ls::analysis::diagnostics::NIL_CHECKS.store(nc, std::sync::atomic::Ordering::Relaxed);
             }
@@ -455,6 +458,7 @@ impl LanguageServer for Backend {
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
+                code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 references_provider: Some(OneOf::Left(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
@@ -644,6 +648,38 @@ impl LanguageServer for Backend {
                 Ok(None)
             }
         }
+    }
+
+    /// Quick fixes: suppress a diagnostic with `// NOLINT(code)` at the end of its line (or `// NOLINTNEXTLINE(code)`
+    /// above it when the line already ends in a comment), see analysis/lint.rs.
+    async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
+        let uri = params.text_document.uri;
+        let Some(source) = self.documents.get(&uri).map(|d| d.source.clone()) else { return Ok(None) };
+        let lines: Vec<&str> = source.split('\n').collect();
+        let mut actions: CodeActionResponse = vec![];
+        for d in params.context.diagnostics.iter().filter(|d| d.source.as_deref() == Some("c4script")) {
+            let Some(NumberOrString::String(code)) = &d.code else { continue };
+            let row = d.range.start.line as usize;
+            let Some(line) = lines.get(row) else { continue };
+            let line = line.trim_end_matches('\r');
+            let edit = if line.contains("//") || line.trim_end().ends_with("*/") {
+                let indent: String = line.chars().take_while(|c| c.is_whitespace()).collect();
+                TextEdit { range: Range::new(Position::new(row as u32, 0), Position::new(row as u32, 0)), new_text: format!("{}// NOLINTNEXTLINE({})\n", indent, code) }
+            } else {
+                let end = line.encode_utf16().count() as u32;
+                TextEdit { range: Range::new(Position::new(row as u32, end), Position::new(row as u32, end)), new_text: format!(" // NOLINT({})", code) }
+            };
+            let mut changes = std::collections::HashMap::new();
+            changes.insert(uri.clone(), vec![edit]);
+            actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                title: format!("Suppress {} on this line (// NOLINT)", code),
+                kind: Some(CodeActionKind::QUICKFIX),
+                diagnostics: Some(vec![d.clone()]),
+                edit: Some(WorkspaceEdit { changes: Some(changes), ..Default::default() }),
+                ..Default::default()
+            }));
+        }
+        Ok(Some(actions))
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
