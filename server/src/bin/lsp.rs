@@ -413,6 +413,9 @@ impl LanguageServer for Backend {
             if let Some(ac) = opts.get("assumeCreateSucceeds").and_then(|v| v.as_bool()) {
                 legacy_clonk_ls::analysis::diagnostics::ASSUME_CREATE.store(ac, std::sync::atomic::Ordering::Relaxed);
             }
+            if let Some(ci) = opts.get("callerInference").and_then(|v| v.as_bool()) {
+                legacy_clonk_ls::analysis::diagnostics::CALLER_INFERENCE.store(ci, std::sync::atomic::Ordering::Relaxed);
+            }
             if let Some(nc) = opts.get("nilChecks").and_then(|v| v.as_bool()) {
                 legacy_clonk_ls::analysis::diagnostics::NIL_CHECKS.store(nc, std::sync::atomic::Ordering::Relaxed);
             }

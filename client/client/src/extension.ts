@@ -54,10 +54,11 @@ function configureAndStartLanguageServer(context: ExtensionContext) {
 	const objectIds = workspace.getConfiguration(CONFIG_NAME).get<boolean>('objectIds', true);
 	const nilChecks = workspace.getConfiguration(CONFIG_NAME).get<boolean>('nilChecks', false);
 	const assumeCreateSucceeds = workspace.getConfiguration(CONFIG_NAME).get<boolean>('assumeCreateSucceeds', true);
+	const callerInference = workspace.getConfiguration(CONFIG_NAME).get<boolean>('callerInference', false);
 	const stringTableLanguages = workspace.getConfiguration(CONFIG_NAME).get<string[]>('stringTableLanguages', ['DE', 'US']);
 	const initializationOptions = gameExecutable
-		? { gameDir: path.dirname(gameExecutable), typeChecks, fieldTypes, objectIds, nilChecks, assumeCreateSucceeds, stringTableLanguages }
-		: { typeChecks, fieldTypes, objectIds, nilChecks, assumeCreateSucceeds, stringTableLanguages };
+		? { gameDir: path.dirname(gameExecutable), typeChecks, fieldTypes, objectIds, nilChecks, assumeCreateSucceeds, callerInference, stringTableLanguages }
+		: { typeChecks, fieldTypes, objectIds, nilChecks, assumeCreateSucceeds, callerInference, stringTableLanguages };
 
 	const serverOptions: ServerOptions = {
 		run: {
@@ -94,7 +95,7 @@ function configureAndStartLanguageServer(context: ExtensionContext) {
 	client.info("Client started");
 
 	// the server reads these once (initializationOptions): offer a reload when one changes
-	const serverSettings = ['pathToGameExecutable', 'typeChecks', 'fieldTypes', 'objectIds', 'nilChecks', 'assumeCreateSucceeds', 'stringTableLanguages'];
+	const serverSettings = ['pathToGameExecutable', 'typeChecks', 'fieldTypes', 'objectIds', 'nilChecks', 'assumeCreateSucceeds', 'callerInference', 'stringTableLanguages'];
 	context.subscriptions.push(workspace.onDidChangeConfiguration(e => {
 		if (serverSettings.some(s => e.affectsConfiguration(CONFIG_NAME + '.' + s))) {
 			window.showInformationMessage('Legacy Clonk: reload the window to apply the changed language server setting.', 'Reload Window')

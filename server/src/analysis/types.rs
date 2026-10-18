@@ -133,13 +133,43 @@ fn merge(a: Option<State>, b: Option<State>) -> Option<State> {
     match (a, b) {
         (None, x) | (x, None) => x,
         (Some(mut a), Some(b)) => {
+            // a call fact ("Contained() isn't nil") holds after the join only if it holds on both paths
+            a.retain(|k, _| !k.starts_with(CALL_FACT) || b.contains_key(k));
             for (k, v) in b {
+                if k.starts_with(CALL_FACT) && !a.contains_key(&k) {
+                    continue;
+                }
                 *a.entry(k).or_insert(NONE) |= v;
             }
             Some(a)
         }
     }
 }
+
+/// The state key of the call fact for a call written `text` (no spaces), e.g. "Contained()".
+pub fn call_fact(text: &str) -> String {
+    format!("{}{}", CALL_FACT, text)
+}
+
+/// A call fact that means the same in a function called on the same object: no variables in its arguments.
+fn transferable(key: &str) -> bool {
+    key.trim_start_matches(CALL_FACT).split(|c| c == '(' || c == ',' || c == ')').skip(1).filter(|a| !a.is_empty())
+        .all(|a| a.chars().all(|c| c.is_ascii_digit()) || NIL_SOURCES.contains(&a)
+            || (a.len() == 4 && a.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')))
+}
+
+/// State key prefix of a call fact: the type a call like `Contained()` / `GetCrew(iPlr)` has after a guard
+/// (`if (!Contained()) return;`), keyed by the call's text.
+const CALL_FACT: &str = "\u{1}c:";
+
+/// Engine functions that can return nil when they find nothing (NIL_SOURCES of diagnostics.rs) and whose guarded
+/// calls are remembered.
+pub const NIL_SOURCES: &[&str] = &["FindObject", "FindObject2", "FindObjectOwner", "FindContents", "FindBase", "FindOtherContents",
+    "Contained", "Contents", "ScrollContents", "GetCursor", "GetViewCursor", "GetCaptain", "GetCrew", "GetHiRank", "GetActionTarget"];
+
+/// Calls that change containment, actions or objects: they end every call fact.
+const FACT_BREAKERS: &[&str] = &["Exit", "Enter", "SetAction", "SetActionTargets", "ObjectSetAction", "RemoveObject", "Collect",
+    "SetCommand", "AddCommand", "AppendCommand", "ChangeDef", "Split2Components"];
 
 /// Result for one function: the type of every evaluated expression and variable use (by node id), the type
 /// each variable has at its declaration/assignment, and the function's return type.
@@ -152,6 +182,9 @@ pub struct FuncTypes {
     /// values assigned to other objects' locals: obj.name = x, LocalN("name", obj) = x, with the object's
     /// definition when the expression shows it (this, CreateObject(ID, ...), FindObject(Find_ID(ID)), ...)
     pub member_writes: HashMap<String, Vec<(Option<String>, Ty)>>,
+    /// direct calls (F() / this->F()): the call facts holding there that also make sense in the callee (no
+    /// variables in them), for callers.rs
+    pub site_facts: HashMap<usize, Vec<String>>,
     /// per parameter: for a reference parameter (&x) the type it holds when the function ends (union over the
     /// exits that assigned it) and whether some exit leaves the caller's value untouched; others (NONE, false)
     pub ref_out: Vec<(Ty, bool)>,
@@ -204,6 +237,7 @@ pub fn clear_cache() {
         s.clear();
     }
     super::objids::clear_cache();
+    super::callers::clear_cache();
     if let Ok(mut t) = TREES.lock() {
         t.clear();
     }
@@ -275,6 +309,39 @@ fn infer_at_depth(index: &Index, info: &FileInfo, src: &str, func: Node, strict:
             inf.out.at.insert(name.id(), t);
         }
     }
+    // what the callers guarantee (callers.rs): parameter types, call facts at the start
+    if super::diagnostics::type_checks_enabled() {
+        let fname = func.child_by_field_name("name");
+        let row = fname.map(|x| x.start_position().row as u32);
+        // only where it can matter: the body calls a nil-capable function or uses a parameter with ->
+        let body = node_text(&func, src);
+        let useful = |d: &FuncDef| NIL_SOURCES.iter().any(|f| body.contains(&format!("{}(", f)))
+            || d.params.iter().any(|(_, p)| body.contains(&format!("{}->", p)) || body.contains(&format!("{} ->", p)));
+        if let Some(fdef) = info.funcs.iter().find(|d| Some(d.name_range.start.line) == row && fname.map(|x| node_text(&x, src) == d.name).unwrap_or(false) && useful(d)) {
+            // while callers are analysed (one level): only the engine's own guarantees
+            let cf = if super::callers::active() { super::callers::facts(index, info, src, fdef) } else { super::callers::engine_facts(index, info, fdef) };
+            if let Some(pl) = named_children(&func).into_iter().find(|c| c.kind() == "parameter_list") {
+                for (i, p) in named_children(&pl).into_iter().filter(|c| c.kind() == "param").enumerate() {
+                    let (Some(name), Some(Some(u))) = (p.child_by_field_name("name"), cf.params.get(i)) else { continue };
+                    if super::index::is_ref_param(&p) {
+                        continue;
+                    }
+                    let n = node_text(&name, src).to_string();
+                    let declared = state.get(&n).copied().unwrap_or(ANY);
+                    // a typed int/bool parameter converts what it gets; others hold exactly the arguments
+                    if declared & (INT | BOOL) != 0 && declared != ANY {
+                        continue;
+                    }
+                    let t = if declared & *u == NONE { declared } else { declared & *u };
+                    state.insert(n, t);
+                    inf.out.at.insert(name.id(), t);
+                }
+            }
+            for k in cf.facts {
+                state.insert(k, !NIL);
+            }
+        }
+    }
     // var declarations anywhere in the function are function-scoped and nil until assigned
     let mut stack = vec![func];
     while let Some(n) = stack.pop() {
@@ -319,6 +386,11 @@ impl<'a> Infer<'a> {
     /// Set a variable's type on this path (and the shadow entries of a reference parameter).
     fn put(&self, st: &mut State, name: &str, t: Ty) {
         st.insert(name.to_string(), t);
+        // a call fact about GetCrew(iPlr) ends when iPlr changes
+        if st.keys().any(|k| k.starts_with(CALL_FACT)) {
+            let is_arg = |k: &str| k.split(|c| c == '(' || c == ',' || c == ')').skip(1).any(|a| a == name);
+            st.retain(|k, _| !k.starts_with(CALL_FACT) || !is_arg(k));
+        }
         if self.refs.iter().any(|(_, r)| r == name) {
             st.insert(ref_written(name), t);
             st.insert(ref_untouched(name), NONE);
@@ -512,6 +584,26 @@ impl<'a> Infer<'a> {
         out
     }
 
+    /// The call-fact key of a call whose result a guard can pin: a NIL_SOURCES engine call (not obj->F()) whose
+    /// arguments are variables, numbers or `this` (`Contained()`, `GetCrew(iPlr)`, `Contents(0, pObj)`).
+    fn call_key(&self, n: &Node) -> Option<String> {
+        if n.kind() != "method_call" || is_arrow_call(n) {
+            return None;
+        }
+        let name = self.text(&n.child_by_field_name("name")?);
+        if !NIL_SOURCES.contains(&name) {
+            return None;
+        }
+        let args: Vec<Node> = n.child_by_field_name("args").map(|a| named_children(&a)).unwrap_or_default()
+            .into_iter().filter(|c| c.kind() != "comment").collect();
+        // variables, numbers, IDs and such calls themselves (Contained(GetCrew(i, j)))
+        if !args.iter().all(|a| matches!(a.kind(), "identifier" | "number" | "nil" | "id") || self.call_key(a).is_some()) {
+            return None;
+        }
+        let args: Vec<String> = args.iter().map(|a| self.text(a).split_whitespace().collect::<String>()).collect();
+        Some(format!("{}{}({})", CALL_FACT, name, args.join(",")))
+    }
+
     fn narrow_into(&self, cond: &Node, st: &mut State, truth: bool) {
         let nc: Vec<Node> = named_children(cond).into_iter().filter(|c| c.kind() != "comment").collect();
         let op = children(cond).iter().find(|c| !c.is_named() && !matches!(c.kind(), "(" | ")")).map(|c| c.kind().to_string()).unwrap_or_default();
@@ -524,8 +616,14 @@ impl<'a> Infer<'a> {
                 }
             }
         };
+        let fact = |n: &Node, st: &mut State| {
+            if let Some(k) = self.call_key(n) {
+                st.insert(k, !NIL);
+            }
+        };
         match (cond.kind(), op.as_str()) {
             ("identifier", _) if truth => not_nil(cond, st),
+            ("method_call", _) if truth => fact(cond, st),
             ("unary_expression", "!") => {
                 if let Some(x) = nc.first() {
                     self.narrow_into(x, st, !truth);
@@ -535,14 +633,17 @@ impl<'a> Infer<'a> {
                 if let Some(x) = nc.first() {
                     not_nil(x, st);
                 }
+                if let Some(v) = nc.get(1) {
+                    fact(v, st);
+                }
             }
             ("binary_expression", "&&") if truth => nc.iter().for_each(|x| self.narrow_into(x, st, true)),
             ("binary_expression", "||") if !truth => nc.iter().for_each(|x| self.narrow_into(x, st, false)),
             ("binary_expression", "!=" | "==") if (op == "!=") == truth => {
                 if let (Some(a), Some(b)) = (nc.first(), nc.get(1)) {
                     match (a.kind(), b.kind()) {
-                        (_, "nil") => not_nil(a, st),
-                        ("nil", _) => not_nil(b, st),
+                        (_, "nil") => { not_nil(a, st); fact(a, st); }
+                        ("nil", _) => { not_nil(b, st); fact(b, st); }
                         _ => {}
                     }
                 }
@@ -642,6 +743,18 @@ impl<'a> Infer<'a> {
                     .into_iter().filter(|c| c.kind() != "comment").collect();
                 let tys: Vec<Ty> = args.iter().map(|a| self.expr(*a, s)).collect();
                 let name = n.child_by_field_name("name").map(|x| self.text(&x)).unwrap_or("");
+                // callers.rs: the call facts a function called here starts with
+                if super::diagnostics::caller_inference_enabled() && (!is_arrow_call(&n) || n.parent().and_then(|p| named_children(&p).into_iter().next()).map(|t| self.text(&t) == "this").unwrap_or(false)) {
+                    if let Some(st) = s.as_ref() {
+                        let facts: Vec<String> = st.keys().filter(|k| k.starts_with(CALL_FACT) && transferable(k)).cloned().collect();
+                        self.out.site_facts.insert(n.id(), facts);
+                    }
+                }
+                if FACT_BREAKERS.contains(&name) {
+                    if let Some(st) = s.as_mut() {
+                        st.retain(|k, _| !k.starts_with(CALL_FACT));
+                    }
+                }
                 // a variable passed to a reference parameter: a script's &x can hold anything afterwards; engine
                 // functions write a known type (engine_api.json "&int": Inc/Dec replace the value, PathFree2/
                 // SimFlight write only sometimes; Set writes its second argument)
@@ -685,7 +798,12 @@ impl<'a> Infer<'a> {
                 }
                 // obj->F(): the receiver's definitions when known (objids.rs)
                 let ids = if is_arrow_call(&n) { super::objids::receiver_ids(self.index, self.info, self.src, &n) } else { None };
-                self.call_type(name, is_arrow_call(&n) || n.child_by_field_name("id").is_some(), ids)
+                let t = self.call_type(name, is_arrow_call(&n) || n.child_by_field_name("id").is_some(), ids);
+                // a guarded call (if (!Contained()) return; ... Contained()) isn't nil
+                match self.call_key(&n).and_then(|k| s.as_ref()?.get(&k).copied()) {
+                    Some(f) => t & f,
+                    None => t,
+                }
             }
             "arrow_expression" => {
                 let nc: Vec<Node> = named_children(&n).into_iter().filter(|c| c.kind() != "comment").collect();
@@ -696,7 +814,12 @@ impl<'a> Infer<'a> {
                     Some(call) if call.kind() == "method_call" => self.expr(*call, s),
                     _ => ANY,
                 };
-                if children(&n).iter().any(|c| c.kind() == "?") { t | NIL } else { t }
+                let safe = children(&n).iter().any(|c| c.kind() == "?");
+                // x->F() ran: x wasn't nil (nil->F() stops the script), so it isn't nil afterwards either
+                if let (false, Some(target), Some(st)) = (safe, nc.first(), s.as_mut()) {
+                    self.narrow_into(target, st, true);
+                }
+                if safe { t | NIL } else { t }
             }
             _ => {
                 for c in named_children(&n) {

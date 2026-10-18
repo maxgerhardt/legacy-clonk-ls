@@ -450,8 +450,10 @@ impl<'a> Ctx<'a> {
             let creator = matches!(f, "CreateObject" | "CreateContents" | "CreateConstruction" | "PlaceAnimal" | "PlaceVegetation" | "ComposeContents");
             (NIL_SOURCES.contains(&f) || (creator && !assume_create_succeeds())).then(|| f.to_string())
         };
+        let maybe_nil = |n: &Node| self.types.as_ref().and_then(|ft| ft.at.get(&n.id()).copied()).map(|t| t & NIL != 0).unwrap_or(true);
         let source = match target.kind() {
-            "method_call" => source_of(&target),
+            // a guarded call (if (!Contained()) return;) has no nil in its type any more
+            "method_call" if maybe_nil(&target) => source_of(&target),
             // only function variables: a local/static has one type for the whole script, so guards don't show
             "identifier" if self.locals.contains(node_text(&target, self.src)) => {
                 let Some(t) = self.types.as_ref().and_then(|ft| ft.at.get(&target.id()).copied()) else { return };
@@ -709,6 +711,16 @@ pub static FIELD_TYPES: std::sync::atomic::AtomicBool = std::sync::atomic::Atomi
 
 /// Track which definitions objects are of (objids.rs) to resolve obj->F() calls (needs type checks on).
 pub static OBJECT_IDS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Infer what a function's callers guarantee (callers.rs): parameter types and call facts of private/protected
+/// functions from all their call sites. Off by default: costly (each caller is analysed) and rarely decisive on the
+/// original scripts; the engine's own guarantees (callbacks, PhaseCall targets, InitializePlayer crew) apply anyway.
+pub static CALLER_INFERENCE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn caller_inference_enabled() -> bool {
+    type_checks_enabled()
+        && (CALLER_INFERENCE.load(std::sync::atomic::Ordering::Relaxed) || std::env::var("C4LS_CALLER_INFERENCE").map(|v| v == "1").unwrap_or(false))
+}
 
 /// Assume CreateObject/CreateContents/... always give an object (type `object`, not `object | nil`).
 pub static ASSUME_CREATE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);

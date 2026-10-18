@@ -1,5 +1,6 @@
 //! Semantic analysis for C4Script: workspace index, diagnostics and code navigation.
 
+pub mod callers;
 pub mod complete;
 pub mod diagnostics;
 pub mod engine;

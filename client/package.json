@@ -105,6 +105,11 @@
 					"default": true,
 					"description": "Assume CreateObject, CreateContents, CreateConstruction, PlaceAnimal, PlaceVegetation and ComposeContents always give an object (type object instead of object | nil). They fail only in exceptional cases (invalid ID, the object removes itself in Initialize). Off: their results count as maybe nil (also for nilChecks)."
 				},
+				"legacy-clonk-ext.callerInference": {
+					"type": "boolean",
+					"default": false,
+					"description": "Advanced, slower (the check takes about 3x as long): infer what a function's callers guarantee. A private/protected function whose name never appears in a string (Schedule, Call, ActMap, DefCore) gets its parameter types from all its call sites, and starts with Contained()/GetActionTarget()/... known to be set when every caller checked it. The engine's own guarantees (Entrance, Collection2, Contained<Com>, PhaseCall of PUSH/ATTACH/... actions, InitializePlayer crew) apply without it. Needs typeChecks."
+				},
 				"legacy-clonk-ext.nilChecks": {
 					"type": "boolean",
 					"default": false,

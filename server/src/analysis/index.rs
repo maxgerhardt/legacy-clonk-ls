@@ -55,6 +55,8 @@ pub struct VarDef {
 pub struct CallSite {
     pub name: String,
     pub range: Range,
+    /// start byte of the name in the script source
+    pub byte: usize,
     pub arrow: bool,
     pub args: usize,
 }
@@ -78,6 +80,113 @@ pub struct FileInfo {
     /// script variables passed as call arguments: (name, function index, callee, argument position); a write site
     /// when the callee has a reference parameter there (Lookup::build -> writers, Index::is_ref_param)
     pub ref_args: Vec<(String, usize, String, usize)>,
+    /// identifiers inside the script's strings and the *Call= values of the ActMap.txt/DefCore.txt next to it
+    /// (functions that may be called by name)
+    pub string_words: HashSet<String>,
+    /// identifiers in strings that call on the script's own object: Schedule("F()") (no ->), ScheduleCall(0/this,
+    /// "F"), AddTimer("F"), Call("F"), PrivateCall/ProtectedCall(this, "F") - they reach only this definition family
+    pub own_string_words: HashSet<String>,
+    /// the text before a format placeholder in a string (Call(Format("Fire%d", i)) may call Fire1, Fire2, ...)
+    pub string_prefixes: HashSet<String>,
+    /// functions the ActMap.txt / DefCore.txt next to the script calls: (function, key like "PhaseCall", the
+    /// action's Procedure or "" for DefCore)
+    pub ini_calls: Vec<(String, String, String)>,
+}
+
+/// Whether a string is a call by name on the script's own object (see FileInfo::own_string_words).
+fn own_object_string(s: &Node, src: &str) -> bool {
+    let Some(args) = s.parent().filter(|p| p.kind() == "args_list") else { return false };
+    let Some(call) = args.parent().filter(|c| c.kind() == "method_call" && !is_arrow_call(c)) else { return false };
+    let name = call.child_by_field_name("name").map(|x| node_text(&x, src)).unwrap_or("");
+    let list: Vec<Node> = named_children(&args).into_iter().filter(|c| c.kind() != "comment").collect();
+    let pos = list.iter().position(|c| c.id() == s.id());
+    let first_is_self = list.first().map(|f| matches!(node_text(f, src), "0" | "this" | "nil" | "this()")).unwrap_or(false);
+    match (name, pos) {
+        ("Schedule", Some(0)) => !node_text(s, src).contains("->"),
+        ("AddTimer", Some(0)) | ("Call", Some(0)) => true,
+        ("ScheduleCall" | "PrivateCall" | "ProtectedCall", Some(1)) => first_is_self,
+        _ => false,
+    }
+}
+
+/// Engine functions that run a string as script or call a function by its name.
+const BY_NAME: &[&str] = &["Schedule", "ScheduleCall", "AddTimer", "Call", "PrivateCall", "ProtectedCall", "ObjectCall",
+    "GameCall", "GameCallEx", "DefinitionCall", "eval", "AddMenuItem", "CreateMenu", "SetCommand", "AddCommand",
+    "AppendCommand", "AddEffect", "EffectCall", "CheckEffect", "GetEffect", "RemoveEffect", "ChangeEffect"];
+
+/// Whether a string can name a function that gets called: false when it goes straight (maybe through Format) into
+/// an engine function that doesn't call by name (SetAction, Sound, Log, Message, ...) or into a comparison;
+/// anything else (by-name calls, script functions, variables, return values) may call.
+fn string_may_call(s: &Node, src: &str) -> bool {
+    let mut cur = *s;
+    loop {
+        let Some(p) = cur.parent() else { return true };
+        match p.kind() {
+            "args_list" => {
+                let Some(call) = p.parent().filter(|c| c.kind() == "method_call") else { return true };
+                let name = call.child_by_field_name("name").map(|x| node_text(&x, src)).unwrap_or("");
+                if name == "Format" {
+                    cur = call;
+                    continue;
+                }
+                return BY_NAME.contains(&name) || !super::engine::ENGINE.functions.contains_key(name) || is_arrow_call(&call);
+            }
+            "binary_expression" => {
+                let op = children(&p).iter().find(|c| !c.is_named() && !matches!(c.kind(), "(" | ")")).map(|c| c.kind().to_string()).unwrap_or_default();
+                return !matches!(op.as_str(), "==" | "!=" | "eq" | "ne" | "S=");
+            }
+            _ => return true,
+        }
+    }
+}
+
+/// Collect the identifiers of a string (and the identifier right before a '%').
+fn string_words(text: &str, words: &mut HashSet<String>, prefixes: &mut HashSet<String>) {
+    let mut cur = String::new();
+    for c in text.chars().chain(std::iter::once(' ')) {
+        if c.is_ascii_alphanumeric() || c == '_' {
+            cur.push(c);
+            continue;
+        }
+        if !cur.is_empty() && !cur.chars().next().unwrap().is_ascii_digit() {
+            if c == '%' {
+                prefixes.insert(cur.clone());
+            }
+            words.insert(std::mem::take(&mut cur));
+        }
+        cur.clear();
+    }
+}
+
+/// Functions an ActMap.txt / DefCore.txt next to a script calls by name: (function, key, the action's Procedure).
+fn ini_calls(dir: &Path) -> Vec<(String, String, String)> {
+    let mut out = vec![];
+    for f in ["ActMap.txt", "DefCore.txt"] {
+        let Ok(bytes) = std::fs::read(dir.join(f)) else { continue };
+        let text = super::text::decode_bytes(&bytes);
+        // per section: its Procedure and the *Call= entries
+        let mut sections: Vec<(String, Vec<(String, String)>)> = vec![(String::new(), vec![])];
+        for line in text.lines() {
+            let line = line.trim();
+            if line.starts_with('[') {
+                sections.push((String::new(), vec![]));
+            } else if let Some((k, v)) = line.split_once('=') {
+                let (k, v) = (k.trim(), v.trim());
+                let sec = sections.last_mut().unwrap();
+                if k == "Procedure" {
+                    sec.0 = v.to_string();
+                } else if k.ends_with("Call") && !v.is_empty() {
+                    sec.1.push((v.to_string(), k.to_string()));
+                }
+            }
+        }
+        for (procedure, calls) in sections {
+            for (func, key) in calls {
+                out.push((func, key, procedure.clone()));
+            }
+        }
+    }
+    out
 }
 
 #[derive(Debug, Clone)]
@@ -117,6 +226,13 @@ struct Lookup {
     includers: HashMap<String, Vec<String>>,
     /// variable name -> (script, function index, member write)
     writers: HashMap<String, Vec<(String, usize, bool)>>,
+    /// function name -> call sites (script, index in its calls)
+    call_sites: HashMap<String, Vec<(String, usize)>>,
+    /// every name in some script's strings / ActMap / DefCore calls, and format prefixes (FileInfo::string_words)
+    string_words: HashSet<String>,
+    string_prefixes: HashSet<String>,
+    /// function -> its ActMap/DefCore uses (key, procedure)
+    ini_calls: HashMap<String, Vec<(String, String, String)>>,
     /// (function, argument position) of reference parameters (script &x, engine C4Value *)
     ref_params: HashSet<(String, usize)>,
     /// lowercase names of the .c4d/.c4f folders that indexed scripts lie in (which packs are indexed)
@@ -166,6 +282,14 @@ impl Lookup {
             }
             for (name, i, member) in &f.writes {
                 l.writers.entry(name.clone()).or_default().push((key.clone(), *i, *member));
+            }
+            for (i, c) in f.calls.iter().enumerate() {
+                l.call_sites.entry(c.name.clone()).or_default().push((key.clone(), i));
+            }
+            l.string_words.extend(f.string_words.iter().cloned());
+            l.string_prefixes.extend(f.string_prefixes.iter().cloned());
+            for (func, k, p) in &f.ini_calls {
+                l.ini_calls.entry(func.clone()).or_default().push((key.clone(), k.clone(), p.clone()));
             }
             for (name, i, callee, pos) in &f.ref_args {
                 if refs.contains(&(callee.clone(), *pos)) && !f.writes.iter().any(|(n, j, m)| n == name && j == i && !m) {
@@ -407,10 +531,17 @@ pub fn extract(path: &Path, src: &str, tree: &Tree) -> FileInfo {
         funcs: vec![],
         vars: vec![],
         calls: vec![],
+        string_words: HashSet::new(),
+        string_prefixes: HashSet::new(),
+        own_string_words: HashSet::new(),
+        ini_calls: vec![],
         id_refs: vec![],
         writes: vec![],
         ref_args: vec![],
     };
+    if let Some(dir) = path.parent() {
+        info.ini_calls = ini_calls(dir);
+    }
     let mut stack = vec![tree.root_node()];
     while let Some(n) = stack.pop() {
         match n.kind() {
@@ -475,12 +606,23 @@ pub fn extract(path: &Path, src: &str, tree: &Tree) -> FileInfo {
                     info.calls.push(CallSite {
                         name: node_text(&name, src).to_string(),
                         range: li.node_range(&name),
+                        byte: name.start_byte(),
                         arrow: is_arrow_call(&n),
                         args,
                     });
                 }
             }
             "id" => info.id_refs.push((node_text(&n, src).to_string(), li.node_range(&n))),
+            // names in strings may be called by name (Schedule("F()"), Call("F"), menus, commands): callers.rs
+            "string" if !string_may_call(&n, src) => {}
+            "string" => {
+                let text = node_text(&n, src);
+                if own_object_string(&n, src) {
+                    string_words(text, &mut info.own_string_words, &mut info.string_prefixes);
+                } else {
+                    string_words(text, &mut info.string_words, &mut info.string_prefixes);
+                }
+            }
             _ => {}
         }
         let mut kids = named_children(&n);
@@ -907,6 +1049,32 @@ impl Index {
     }
 
     /// Functions assigning the script variable `name`: (script, function index, member write).
+    /// Every call of a function named `name` (direct and obj->name()) in the indexed scripts.
+    pub fn call_sites<'a>(&'a self, name: &str) -> Vec<(&'a FileInfo, &'a CallSite)> {
+        self.lookup().call_sites.get(name).into_iter().flatten()
+            .filter_map(|(k, i)| self.files.get(k).and_then(|f| f.calls.get(*i).map(|c| (f, c))))
+            .collect()
+    }
+
+    /// Whether the function `name` of `file` may be called by name from a string: one that reaches any object
+    /// (GameCall, ObjectCall, "obj->F()", menus, effects, ...) anywhere, an own-object call (Schedule("F()"),
+    /// ScheduleCall(this, "F"), ...) in its definition family, or a Format("Name%d") prefix.
+    pub fn named_in_strings(&self, file: &FileInfo, name: &str) -> bool {
+        let l = self.lookup();
+        if l.string_words.contains(name) || l.string_prefixes.iter().any(|p| p.len() >= 3 && name.starts_with(p.as_str())) {
+            return true;
+        }
+        if file.own_string_words.contains(name) {
+            return true;
+        }
+        self.family(file).iter().any(|f| f.own_string_words.contains(name))
+    }
+
+    /// How ActMap/DefCore files call a function: (script next to the file, key like "PhaseCall", procedure).
+    pub fn ini_uses(&self, name: &str) -> Vec<(String, String, String)> {
+        self.lookup().ini_calls.get(name).cloned().unwrap_or_default()
+    }
+
     /// Whether some script or engine function `callee` has a reference parameter at `pos`.
     pub fn is_ref_param(&self, callee: &str, pos: usize) -> bool {
         self.lookup().ref_params.contains(&(callee.to_string(), pos))
