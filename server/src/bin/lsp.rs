@@ -466,6 +466,7 @@ impl LanguageServer for Backend {
                 document_formatting_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+                inlay_hint_provider: Some(OneOf::Left(true)),
                 rename_provider: Some(OneOf::Right(RenameOptions { prepare_provider: Some(true), work_done_progress_options: Default::default() })),
                 references_provider: Some(OneOf::Left(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
@@ -662,6 +663,22 @@ impl LanguageServer for Backend {
                 Ok(None)
             }
         }
+    }
+
+    /// Inferred types as inlay hints (`var x: int`, `func F() -> string`); VS Code's editor.inlayHints.enabled
+    /// switches them off.
+    async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
+        let hints = self.with_script(&params.text_document.uri, |idx, info, doc| query::inlay_hints(idx, info, &doc.tree, &doc.source, params.range));
+        Ok(hints.map(|h| h.into_iter().map(|(position, label)| InlayHint {
+            position,
+            label: InlayHintLabel::String(label),
+            kind: Some(InlayHintKind::TYPE),
+            text_edits: None,
+            tooltip: None,
+            padding_left: Some(false),
+            padding_right: Some(false),
+            data: None,
+        }).collect()))
     }
 
     /// Rename (F2): only exact cases (query::rename_targets); the reason otherwise shows in the editor.

@@ -21,6 +21,10 @@ Set `legacy-clonk-ext.pathToGameExecutable` (and `pathToC4gExecutable`) so the s
   functions' return types, `local`/`static` types from all their assignments, array element types, and which
   definition an object is (`CreateObject(FLNT, ...)`, `FindObject2(Find_ID(FLNT))`, `if (GetID(o) == FLNT)`), so
   `obj->F()` jumps to exactly the function that runs and warns when that definition has none.
+- **Inlay hints**: the inferred type after each `var x` (`: object<FLNT> | nil`) and a function's return type;
+  turn them off with VS Code's `editor.inlayHints.enabled`.
+- **Rename** (F2) of a function's variables, parameters and map keys and of private functions (other names may be
+  used by other objects, strings or the engine, so they are refused with the reason).
 - **Lint** (shown faded): unused variables, parameters, `local`s and private functions, unreachable code.
 - **nil checks** (opt-in): `obj->F()` where obj may be nil (from FindObject2, Contained, Contents, GetCursor,
   ...) and no `if (obj)` / `if (!obj) return;` guards it.

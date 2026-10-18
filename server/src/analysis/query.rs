@@ -579,3 +579,54 @@ pub fn rename(index: &Index, info: &FileInfo, tree: &Tree, src: &str, pos: Posit
     let _ = old;
     Ok(locs)
 }
+
+/// Inlay hints in `range`: the inferred type after each `var x` / for-in variable (not for `any` or a plain
+/// `var x;`), and `-> type` after a function's parameter list. (position, label)
+pub fn inlay_hints(index: &Index, info: &FileInfo, tree: &Tree, src: &str, range: Range) -> Vec<(Position, String)> {
+    use super::types::{display, ANY, NIL, NONE};
+    let li = LineIndex::new(src);
+    let root = tree.root_node();
+    let strict = super::diagnostics::strict_level(&root, src);
+    let mut out = vec![];
+    for func in super::index::named_children(&root).into_iter().filter(|n| n.kind() == "function_definition") {
+        let r = li.node_range(&func);
+        if r.end.line < range.start.line || r.start.line > range.end.line {
+            continue;
+        }
+        let types = super::types::infer_function(index, info, src, func, strict);
+        let shown = |t: u16| t != ANY && t != NONE && t != NIL;
+        // return type after ')'
+        if let Some(pl) = super::index::named_children(&func).into_iter().find(|c| c.kind() == "parameter_list") {
+            if shown(types.returns) {
+                out.push((li.node_range(&pl).end, format!(" -> {}", display(types.returns))));
+            }
+        }
+        let mut stack = vec![func];
+        while let Some(n) = stack.pop() {
+            let decl = match n.kind() {
+                // var x = ... (with a value: a plain `var x;` is just nil)
+                "var_assignment" if super::index::named_children(&n).len() > 1 => {
+                    let is_var = n.parent().map(|p| super::index::named_children(&p).iter().any(|c| c.kind() == "var_scope" && node_text(c, src) == "var")).unwrap_or(false);
+                    super::index::named_children(&n).into_iter().next().filter(|_| is_var)
+                }
+                _ => None,
+            };
+            let loop_vars = if n.kind() == "for_statement" { super::index::for_in_vars(&n) } else { vec![] };
+            for id in decl.into_iter().chain(loop_vars) {
+                if let Some(t) = types.at.get(&id.id()).copied().filter(|t| shown(*t)) {
+                    let mut label = display(t);
+                    // the definition when objids knows it: object<DLNT>
+                    if t & super::types::OBJECT != 0 {
+                        if let Some(ids) = super::objids::ids_of(index, info, src, &id).filter(|i| i.len() <= 3) {
+                            label = label.replacen("object", &format!("object<{}>", ids.join(" | ")), 1);
+                        }
+                    }
+                    out.push((li.node_range(&id).end, format!(": {}", label)));
+                }
+            }
+            stack.extend(super::index::named_children(&n));
+        }
+    }
+    out.retain(|(p, _)| p.line >= range.start.line && p.line <= range.end.line);
+    out
+}
