@@ -21,6 +21,7 @@ impl OwnSemanticTokenType {
     const PARAMETER_TYPE: SemanticTokenType = SemanticTokenType::new("parameterType");
     const ID: SemanticTokenType = SemanticTokenType::new("id");
     const BOOL: SemanticTokenType = SemanticTokenType::new("bool");
+    const THIS: SemanticTokenType = SemanticTokenType::new("thisKeyword");
 }
 const NEGOTIATE_TOKENT_TYPES: bool = false;
 const LOG_TREE_UPDATE_POSITIONS: bool = false;
@@ -68,7 +69,10 @@ impl Backend {
             parameter_type: 5,
             bool: 4,
             operator: 0, // TODO
+            enum_member: 8,
+            this_kw: 4,
         };
+        negotiated.push(SemanticTokenType::ENUM_MEMBER); // index 8: engine constants, static consts
 
         // Set additional custom tokens
         if NEGOTIATE_TOKENT_TYPES {
@@ -99,6 +103,8 @@ impl Backend {
             negotiated.push(OwnSemanticTokenType::ID);
             lut.bool = (negotiated.len()) as u32;
             negotiated.push(OwnSemanticTokenType::BOOL);
+            lut.this_kw = (negotiated.len()) as u32;
+            negotiated.push(OwnSemanticTokenType::THIS);
         }
 
         let legend = SemanticTokensLegend {

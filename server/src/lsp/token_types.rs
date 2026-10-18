@@ -14,4 +14,8 @@ pub struct TokenTypes {
     pub parameter_type: u32,
     pub bool: u32,
     pub operator: u32,
+    /// engine constants (NO_OWNER, COMD_Left ...) and the script's static consts: enumMember
+    pub enum_member: u32,
+    /// `this`: own type thisKeyword (scope variable.language.this)
+    pub this_kw: u32,
 }

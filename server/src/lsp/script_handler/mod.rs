@@ -7,7 +7,7 @@ mod highlighting;
 pub struct ScriptHandler;
 
 impl AssetHandler for ScriptHandler {
-    fn collect_semantic_tokens(&self, tree: &tree_sitter::Tree, lut: TokenTypes, _: &str) -> Vec<SemanticToken> {
-        highlighting::Highlighter::collect_tokens(tree, lut)
+    fn collect_semantic_tokens(&self, tree: &tree_sitter::Tree, lut: TokenTypes, src: &str) -> Vec<SemanticToken> {
+        highlighting::Highlighter::collect_tokens_with_source(tree, lut, src)
     }
 }

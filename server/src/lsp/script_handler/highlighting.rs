@@ -1,4 +1,5 @@
 use tower_lsp::lsp_types::SemanticToken; use tree_sitter::{Tree, TreeCursor, Node};
+use std::collections::HashSet;
 use crate::lsp::{highlight_helper::{add_semantic_token, Context}, token_types::TokenTypes};
 
 pub struct Highlighter;
@@ -6,13 +7,19 @@ pub struct Highlighter;
 impl Highlighter {
 
     pub fn collect_tokens(tree: &Tree, lut: TokenTypes) -> Vec<SemanticToken> {
+        Self::collect_tokens_with_source(tree, lut, "")
+    }
+
+    /// With the source text: identifiers can be told apart (engine constants, the script's static consts, `this`).
+    pub fn collect_tokens_with_source(tree: &Tree, lut: TokenTypes, src: &str) -> Vec<SemanticToken> {
         let mut cursor = tree.walk();
         let mut ctx = Context {
             token_types: lut,
             ..Context::default()
         };
+        let src = Source { text: src, consts: static_consts(tree, src) };
 
-        Self::collect_tokens_step(&mut cursor, &mut ctx);
+        Self::collect_tokens_step(&mut cursor, &mut ctx, &src);
         cursor.goto_first_child();
 
         ctx.collection
@@ -29,6 +36,7 @@ impl Highlighter {
     fn collect_tokens_step(
         cursor: &mut TreeCursor,
         ctx: &mut Context,
+        src: &Source,
     ) {
         loop {
             let node = cursor.node();
@@ -108,6 +116,7 @@ impl Highlighter {
                                 Self::collect_tokens_step(
                                     cursor,
                                     ctx,
+                                    src,
                                 );
                             }
                         } else {
@@ -242,6 +251,16 @@ impl Highlighter {
                             &node,
                         );
                     },
+                    // plain identifiers (not function names or parameters, which their parents color):
+                    // `this`, engine constants and the script's static consts
+                    "identifier" if !src.text.is_empty() && !Self::is_named_by_parent(&node) => {
+                        let text = &src.text[node.start_byte()..node.end_byte()];
+                        if text == "this" {
+                            Self::add_token(ctx, ctx.token_types.this_kw, &node);
+                        } else if crate::analysis::engine::ENGINE.constants.contains_key(text) || src.consts.contains(text) {
+                            Self::add_token(ctx, ctx.token_types.enum_member, &node);
+                        }
+                    },
                     _ => {},
                 }
             }
@@ -250,6 +269,7 @@ impl Highlighter {
                 Self::collect_tokens_step(
                     cursor,
                     ctx,
+                    src,
                 );
             }
 
@@ -261,6 +281,43 @@ impl Highlighter {
         cursor.goto_parent();
     }
 
+}
+
+impl Highlighter {
+    /// identifiers whose parent already adds a token for them (function names, parameters)
+    fn is_named_by_parent(node: &Node) -> bool {
+        match node.parent() {
+            Some(p) => matches!(p.kind(), "method_call" | "function_definition" | "old_function_definition" | "param"),
+            None => false,
+        }
+    }
+}
+
+pub struct Source<'a> {
+    text: &'a str,
+    consts: HashSet<String>,
+}
+
+/// names of the script's `static const` declarations
+fn static_consts(tree: &Tree, src: &str) -> HashSet<String> {
+    let mut out = HashSet::new();
+    if src.is_empty() {
+        return out;
+    }
+    let mut stack = vec![tree.root_node()];
+    while let Some(n) = stack.pop() {
+        if n.kind() == "var_definition" && n.child_by_field_name("const").is_some() {
+            let mut c = n.walk();
+            for va in n.named_children(&mut c).filter(|x| x.kind() == "var_assignment") {
+                if let Some(id) = va.named_child(0) {
+                    out.insert(src[id.start_byte()..id.end_byte()].to_string());
+                }
+            }
+        }
+        let mut c = n.walk();
+        stack.extend(n.named_children(&mut c));
+    }
+    out
 }
 
 #[cfg(test)]
@@ -313,6 +370,18 @@ mod tests {
         let tokens = Highlighter::collect_tokens(&tree, TokenTypes::default());
 
         assert!(tokens.len() > 0);
+    }
+
+    #[test]
+    fn colors_engine_constants_static_consts_and_this() {
+        let mut parser = Parser::new();
+        parser.set_language(tree_sitter_c4script::language()).expect("Loading c4scrpt grammar");
+        let src = "#strict 3\nstatic const MyLimit = 5;\nfunc f() { var o = CreateObject(ROCK, 0, 0, NO_OWNER); return this && MyLimit; }";
+        let tree = parser.parse(src, None).unwrap();
+        let lut = TokenTypes { enum_member: 20, this_kw: 21, ..TokenTypes::default() };
+        let tokens = Highlighter::collect_tokens_with_source(&tree, lut, src);
+        assert_eq!(tokens.iter().filter(|t| t.token_type == 20).count(), 3, "NO_OWNER, MyLimit (declaration + use)");
+        assert_eq!(tokens.iter().filter(|t| t.token_type == 21).count(), 1, "this");
     }
 
     #[test]

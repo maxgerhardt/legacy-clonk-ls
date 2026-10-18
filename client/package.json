@@ -156,6 +156,9 @@
 					],
 					"bool": [
 						"constant.language.boolean"
+					],
+					"thisKeyword": [
+						"variable.language.this"
 					]
 				}
 			},
@@ -186,6 +189,11 @@
 			{
 				"description": "Booleans",
 				"id": "bool",
+				"superType": "keyword"
+			},
+			{
+				"description": "this (the object the script runs in)",
+				"id": "thisKeyword",
 				"superType": "keyword"
 			}
 		]
