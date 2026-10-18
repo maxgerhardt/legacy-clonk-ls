@@ -39,6 +39,9 @@ struct Backend {
     index: RwLock<Index>,
     /// game folder (initializationOptions.gameDir / env C4LS_GAME_DIR) and whether to index all its packs
     game: RwLock<Option<(std::path::PathBuf, bool)>>,
+    /// newest version of each changed document: a change only gets analysed when no newer one followed it
+    /// within the debounce time (typing in a big script would otherwise queue a full analysis per keystroke)
+    versions: DashMap<Url, i32>,
 }
 
 impl Backend {
@@ -249,9 +252,13 @@ impl Backend {
         }
         let path = c4index::uri_to_path(uri)?;
         let info = c4index::extract(&path, &doc.source, &doc.tree);
-        let mut index = self.index.write().ok()?;
-        let diags = diagnostics::diagnose(&index, &info, &doc.source, &doc.tree);
-        index.update_file(info);
+        // analyse under the read lock (hover/completion can run meanwhile), update the index afterwards
+        let diags = {
+            let index = self.index.read().ok()?;
+            diagnostics::diagnose(&index, &info, &doc.source, &doc.tree)
+        };
+        drop(doc);
+        self.index.write().ok()?.update_file(info);
         Some(diags)
     }
 
@@ -502,6 +509,12 @@ impl LanguageServer for Backend {
             self.client.log_message(MessageType::INFO, e).await;
             return;
         }
+        let version = params.text_document.version;
+        self.versions.insert(uri.clone(), version);
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        if self.versions.get(&uri).map(|v| *v) != Some(version) {
+            return; // a newer change will publish
+        }
         self.refresh(uri).await;
     }
 
@@ -740,6 +753,7 @@ async fn start_language_server() {
         workspace: RwLock::new(Workspace::new()),
         index: RwLock::new(Index::default()),
         game: RwLock::new(None),
+        versions: DashMap::new(),
     })
     .custom_method("x-legacy-clonk/getAllIds", Backend::request_ids)
     .finish();

@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 cc = "*"
-tokio = { version = "1.33.0", features = ["macros", "rt-multi-thread", "io-std"] }
+tokio = { version = "1.33.0", features = ["macros", "rt-multi-thread", "io-std", "time"] }
 tower-lsp = "0.20.0"
 tree-sitter = "0.20.10"
 dashmap = "5.5.3"
