@@ -148,6 +148,18 @@ pub struct FuncTypes {
     /// values assigned to other objects' locals: obj.name = x, LocalN("name", obj) = x, with the object's
     /// definition when the expression shows it (this, CreateObject(ID, ...), FindObject(Find_ID(ID)), ...)
     pub member_writes: HashMap<String, Vec<(Option<String>, Ty)>>,
+    /// per parameter: for a reference parameter (&x) the type it holds when the function ends (union over the
+    /// exits that assigned it) and whether some exit leaves the caller's value untouched; others (NONE, false)
+    pub ref_out: Vec<(Ty, bool)>,
+}
+
+/// State keys shadowing a reference parameter: the type written to it on this path, and "not written on this path"
+/// (non-NONE). Names can't contain these characters.
+fn ref_written(name: &str) -> String {
+    format!("\u{1}w:{}", name)
+}
+fn ref_untouched(name: &str) -> String {
+    format!("\u{1}u:{}", name)
 }
 
 /// Inferred type of a script variable.
@@ -161,6 +173,8 @@ pub struct FieldType {
 
 lazy_static::lazy_static! {
     static ref SUMMARIES: Mutex<HashMap<String, Ty>> = Mutex::new(HashMap::new());
+    /// reference parameters of script functions: what each one holds at the end (FuncTypes::ref_out)
+    static ref REF_SUMMARIES: Mutex<HashMap<String, Vec<(Ty, bool)>>> = Mutex::new(HashMap::new());
     /// script variable types: "local|<def script>|name" / "static|name" -> (type, assignments, scripts)
     static ref FIELDS: Mutex<HashMap<String, FieldType>> = Mutex::new(HashMap::new());
     static ref IN_PROGRESS: Mutex<HashSet<String>> = Mutex::new(HashSet::new());
@@ -177,6 +191,9 @@ pub(crate) fn busy_key(key: &str) -> String {
 /// Forget cached return types and parsed scripts (call after files changed).
 pub fn clear_cache() {
     if let Ok(mut s) = SUMMARIES.lock() {
+        s.clear();
+    }
+    if let Ok(mut s) = REF_SUMMARIES.lock() {
         s.clear();
     }
     if let Ok(mut s) = FIELDS.lock() {
@@ -218,6 +235,8 @@ pub struct Infer<'a> {
     locals: HashSet<String>,
     loops: Vec<(Option<State>, Option<State>)>,
     out: FuncTypes,
+    /// reference parameters (&x): (index, name)
+    refs: Vec<(usize, String)>,
 }
 
 /// Analyse function `func` (a function_definition or old_function_definition node of `info`'s source `src`).
@@ -227,13 +246,19 @@ pub fn infer_function(index: &Index, info: &FileInfo, src: &str, func: Node, str
 
 fn infer_at_depth(index: &Index, info: &FileInfo, src: &str, func: Node, strict: u8, depth: u8) -> FuncTypes {
     let in_global = func.child_by_field_name("visibility").map(|v| node_text(&v, src) == "global").unwrap_or(false);
-    let mut inf = Infer { index, info, src, strict, in_global, depth, locals: HashSet::new(), loops: vec![], out: FuncTypes::default() };
+    let mut inf = Infer { index, info, src, strict, in_global, depth, locals: HashSet::new(), loops: vec![], out: FuncTypes::default(), refs: vec![] };
     let mut state = State::new();
     // parameters: typed ones have their type (int/bool convert nil to 0/false, the others may be nil)
     if let Some(pl) = named_children(&func).into_iter().find(|c| c.kind() == "parameter_list") {
-        for p in named_children(&pl).into_iter().filter(|c| c.kind() == "param") {
+        for (i, p) in named_children(&pl).into_iter().filter(|c| c.kind() == "param").enumerate() {
             let Some(name) = p.child_by_field_name("name") else { continue };
-            let t = match p.child_by_field_name("type") {
+            inf.out.ref_out.push((NONE, false));
+            if super::index::is_ref_param(&p) {
+                let n = node_text(&name, src).to_string();
+                state.insert(ref_untouched(&n), INT);
+                inf.refs.push((i, n));
+            }
+            let t = match p.child_by_field_name("type").filter(|_| !super::index::is_ref_param(&p)) {
                 Some(ty) => {
                     let t = from_name(node_text(&ty, src));
                     if t == ANY || t & (INT | BOOL) != 0 { t } else { t | NIL }
@@ -282,10 +307,31 @@ fn infer_at_depth(index: &Index, info: &FileInfo, src: &str, func: Node, strict:
     if s.is_some() {
         inf.out.returns |= NIL; // falls off the end: nil
     }
+    inf.exit(&s);
     inf.out
 }
 
 impl<'a> Infer<'a> {
+    /// Set a variable's type on this path (and the shadow entries of a reference parameter).
+    fn put(&self, st: &mut State, name: &str, t: Ty) {
+        st.insert(name.to_string(), t);
+        if self.refs.iter().any(|(_, r)| r == name) {
+            st.insert(ref_written(name), t);
+            st.insert(ref_untouched(name), NONE);
+        }
+    }
+
+    /// A path leaves the function: what it wrote into the reference parameters.
+    fn exit(&mut self, s: &Option<State>) {
+        let Some(st) = s else { return };
+        for (i, name) in &self.refs {
+            if let Some(o) = self.out.ref_out.get_mut(*i) {
+                o.0 |= st.get(&ref_written(name)).copied().unwrap_or(NONE);
+                o.1 |= st.get(&ref_untouched(name)).copied().unwrap_or(NONE) != NONE;
+            }
+        }
+    }
+
     fn text(&self, n: &Node) -> &'a str {
         node_text(n, self.src)
     }
@@ -312,7 +358,7 @@ impl<'a> Infer<'a> {
                     };
                     if is_var {
                         if let Some(st) = s.as_mut() {
-                            st.insert(self.text(id).to_string(), t);
+                            self.put(st, self.text(id), t);
                         }
                         self.out.at.insert(id.id(), t);
                     }
@@ -349,6 +395,7 @@ impl<'a> Infer<'a> {
                     None => NIL,
                 };
                 self.out.returns |= t;
+                self.exit(&s);
                 None
             }
             "flow_control_statement" => {
@@ -389,7 +436,7 @@ impl<'a> Infer<'a> {
             for v in &vars {
                 if let Some(st) = s.as_mut() {
                     if self.locals.contains(self.text(v)) {
-                        st.insert(self.text(v).to_string(), elem);
+                        self.put(st, self.text(v), elem);
                     }
                 }
                 self.out.at.insert(v.id(), elem);
@@ -453,7 +500,7 @@ impl<'a> Infer<'a> {
         let name = self.text(lhs);
         if self.locals.contains(name) {
             if let Some(st) = s.as_mut() {
-                st.insert(name.to_string(), t);
+                self.put(st, name, t);
             }
             self.out.at.insert(lhs.id(), t);
         } else if name != "this" {
@@ -533,11 +580,50 @@ impl<'a> Infer<'a> {
             }
             "binary_expression" => self.binary(n, s),
             "method_call" => {
-                let args: Vec<Node> = n.child_by_field_name("args").map(|a| named_children(&a)).unwrap_or_default();
-                for a in args.into_iter().filter(|c| c.kind() != "comment") {
-                    self.expr(a, s);
-                }
+                let args: Vec<Node> = n.child_by_field_name("args").map(|a| named_children(&a)).unwrap_or_default()
+                    .into_iter().filter(|c| c.kind() != "comment").collect();
+                let tys: Vec<Ty> = args.iter().map(|a| self.expr(*a, s)).collect();
                 let name = n.child_by_field_name("name").map(|x| self.text(&x)).unwrap_or("");
+                // a variable passed to a reference parameter: a script's &x can hold anything afterwards; engine
+                // functions write a known type (engine_api.json "&int": Inc/Dec replace the value, PathFree2/
+                // SimFlight write only sometimes; Set writes its second argument)
+                for (i, a) in args.iter().enumerate() {
+                    if a.kind() != "identifier" || !self.locals.contains(self.text(a)) {
+                        continue;
+                    }
+                    let engine_ref = ENGINE.functions.get(name).and_then(|f| f.params.as_ref()?.get(i)).map(|p| p.etype.starts_with('&')).unwrap_or(false);
+                    if !engine_ref && !self.index.all_funcs(name).iter().any(|(_, f)| f.params.get(i).and_then(|p| p.0.as_deref()) == Some("&")) {
+                        continue;
+                    }
+                    let reach = if is_arrow_call(&n) { self.index.reachable_funcs(&self.info.path, name) } else { self.index.visible_funcs(self.info, name) };
+                    let written = if !reach.is_empty() {
+                        let refs: Vec<_> = reach.into_iter().filter(|(_, f)| f.params.get(i).and_then(|p| p.0.as_deref()) == Some("&")).collect();
+                        if refs.is_empty() {
+                            None
+                        } else {
+                            // what the function body leaves in it (the caller's value where some path doesn't write)
+                            let old = s.as_ref().and_then(|st| st.get(self.text(a)).copied()).unwrap_or(ANY);
+                            Some(refs.iter().fold(NONE, |t, (file, f)| {
+                                let (w, keep) = self.ref_summary(file, f, i);
+                                t | w | if keep { old } else { NONE }
+                            }))
+                        }
+                    } else {
+                        let et = ENGINE.functions.get(name).and_then(|f| f.params.as_ref()?.get(i)).map(|p| p.etype.as_str()).unwrap_or("");
+                        match et.strip_prefix('&') {
+                            Some(_) if name == "Set" => Some(tys.get(1).copied().unwrap_or(ANY)),
+                            Some(t) => {
+                                let t = from_name(t);
+                                let old = s.as_ref().and_then(|st| st.get(self.text(a)).copied()).unwrap_or(ANY);
+                                Some(if matches!(name, "Inc" | "Dec") { t } else { t | old })
+                            }
+                            None => None,
+                        }
+                    };
+                    if let (Some(t), Some(st)) = (written, s.as_mut()) {
+                        self.put(st, self.text(a), t);
+                    }
+                }
                 // obj->F(): the receiver's definitions when known (objids.rs)
                 let ids = if is_arrow_call(&n) { super::objids::receiver_ids(self.index, self.info, self.src, &n) } else { None };
                 self.call_type(name, is_arrow_call(&n) || n.child_by_field_name("id").is_some(), ids)
@@ -709,6 +795,36 @@ impl<'a> Infer<'a> {
             }
         }
         if t == NONE { ANY } else { t }
+    }
+
+    /// What a script function leaves in its reference parameter `i`: (type written, some path doesn't write);
+    /// (ANY, true) when unknown (recursion, depth).
+    fn ref_summary(&self, file: &FileInfo, f: &FuncDef, i: usize) -> (Ty, bool) {
+        if self.depth >= MAX_DEPTH {
+            return (ANY, true);
+        }
+        let key = format!("{}|{}|{}", path_key(&file.path), f.name, f.name_range.start.line);
+        if let Some(r) = REF_SUMMARIES.lock().ok().and_then(|m| m.get(&key).cloned()) {
+            return r.get(i).copied().unwrap_or((ANY, true));
+        }
+        if !IN_PROGRESS.lock().map(|mut p| p.insert(busy_key(&format!("ref|{}", key)))).unwrap_or(false) {
+            return (ANY, true);
+        }
+        let current_key = path_key(&self.info.path);
+        let r: Vec<(Ty, bool)> = parsed_script(&file.path, Some((&current_key, self.src))).and_then(|entry| {
+            let (src, tree) = (&entry.0, &entry.1);
+            let root = tree.root_node();
+            let strict = super::diagnostics::strict_level(&root, src);
+            let func = find_func(&root, src, f)?;
+            Some(infer_at_depth(self.index, file, src, func, strict, self.depth + 1).ref_out)
+        }).unwrap_or_default();
+        if let Ok(mut p) = IN_PROGRESS.lock() {
+            p.remove(&busy_key(&format!("ref|{}", key)));
+        }
+        if let Ok(mut m) = REF_SUMMARIES.lock() {
+            m.insert(key, r.clone());
+        }
+        r.get(i).copied().unwrap_or((ANY, true))
     }
 
     /// Inferred return type of a script function (cached; recursion and deep chains give `any`).
@@ -889,7 +1005,7 @@ impl<'a> Infer<'a> {
 
 /// Inferred return type of script function `f` of `file` (cached), e.g. for hover.
 pub fn script_return(index: &Index, file: &FileInfo, f: &FuncDef) -> Ty {
-    let inf = Infer { index, info: file, src: "", strict: 3, in_global: false, depth: 0, locals: HashSet::new(), loops: vec![], out: FuncTypes::default() };
+    let inf = Infer { index, info: file, src: "", strict: 3, in_global: false, depth: 0, locals: HashSet::new(), loops: vec![], out: FuncTypes::default(), refs: vec![] };
     inf.summary(file, f)
 }
 
@@ -946,6 +1062,6 @@ pub(crate) fn find_func<'t>(root: &Node<'t>, src: &str, f: &FuncDef) -> Option<N
 
 /// Inferred type of the script variable `name` as seen from `info` (None: not a script variable, or switched off).
 pub fn field_type(index: &Index, info: &FileInfo, src: &str, name: &str) -> Option<FieldType> {
-    let inf = Infer { index, info, src, strict: 3, in_global: false, depth: 0, locals: HashSet::new(), loops: vec![], out: FuncTypes::default() };
+    let inf = Infer { index, info, src, strict: 3, in_global: false, depth: 0, locals: HashSet::new(), loops: vec![], out: FuncTypes::default(), refs: vec![] };
     inf.field(name)
 }

@@ -1365,6 +1365,7 @@
 "ertype": "int",
 "params": [
 {
+"etype": "int",
 "name": "iPlayer",
 "type": "int"
 }
@@ -1735,18 +1736,22 @@
 "ertype": "bool",
 "params": [
 {
+"etype": "int",
 "name": "iRangeX",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iRangeY",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iSpeed",
 "type": "int"
 },
 {
+"etype": "object",
 "name": "pObj",
 "type": "object"
 }
@@ -1762,10 +1767,12 @@
 "ertype": "bool",
 "params": [
 {
+"etype": "bool",
 "name": "fCon1",
 "type": "bool"
 },
 {
+"etype": "bool",
 "name": "fCon2",
 "type": "bool"
 }
@@ -1949,10 +1956,12 @@
 "ertype": "any",
 "params": [
 {
+"etype": "int",
 "name": "iVarIndex",
 "type": "int"
 },
 {
+"etype": "any",
 "name": "iValue",
 "type": "any"
 }
@@ -1968,6 +1977,7 @@
 "ertype": "int",
 "params": [
 {
+"etype": "int",
 "name": "iRange",
 "type": "int"
 }
@@ -1983,10 +1993,12 @@
 "ertype": "int",
 "params": [
 {
+"etype": "int",
 "name": "iVal1",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iVal2",
 "type": "int"
 }
@@ -2037,14 +2049,17 @@
 "ertype": "bool",
 "params": [
 {
+"etype": "int",
 "name": "iLevel",
 "type": "int"
 },
 {
+"etype": "object",
 "name": "pObj",
 "type": "object"
 },
 {
+"etype": "int",
 "name": "iCausedByPlusOne",
 "type": "int"
 }
@@ -3448,10 +3463,12 @@
 "ertype": "any",
 "params": [
 {
+"etype": "&int",
 "name": "Value",
-"type": "&any"
+"type": "&int"
 },
 {
+"etype": "any",
 "name": "Diff",
 "type": "any"
 }
@@ -3467,6 +3484,7 @@
 "ertype": "any",
 "params": [
 {
+"etype": "int",
 "name": "iVarIndex",
 "type": "int"
 }
@@ -3656,10 +3674,12 @@
 "ertype": "int",
 "params": [
 {
+"etype": "int",
 "name": "iVal1",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iVal2",
 "type": "int"
 }
@@ -4033,38 +4053,47 @@
 "ertype": "int",
 "params": [
 {
+"etype": "int",
 "name": "tx",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "ty",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "twdt",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "thgt",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "icntx",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "icnty",
 "type": "int"
 },
 {
+"etype": "string",
 "name": "strMaterial",
 "type": "string"
 },
 {
+"etype": "string",
 "name": "strTexture",
 "type": "string"
 },
 {
+"etype": "bool",
 "name": "bIFT",
 "type": "bool"
 }
@@ -4371,10 +4400,12 @@
 "ertype": "bool",
 "params": [
 {
+"etype": "any",
 "name": "Val1",
 "type": "any"
 },
 {
+"etype": "any",
 "name": "Val2",
 "type": "any"
 }
@@ -4390,6 +4421,7 @@
 "ertype": "bool",
 "params": [
 {
+"etype": "object",
 "name": "pObj",
 "type": "object"
 }
@@ -5456,6 +5488,7 @@
 "ertype": "bool",
 "params": [
 {
+"etype": "int",
 "name": "iGameOverValue",
 "type": "int"
 }
@@ -6415,6 +6448,7 @@
 "ertype": "string",
 "params": [
 {
+"etype": "int",
 "name": "idPlayer",
 "type": "int"
 }
@@ -6430,6 +6464,7 @@
 "ertype": "any",
 "params": [
 {
+"etype": "int",
 "name": "idPlayer",
 "type": "int"
 }
@@ -7235,6 +7270,7 @@
 "ertype": "int",
 "params": [
 {
+"etype": "int",
 "name": "iPlr",
 "type": "int"
 }
@@ -7531,10 +7567,12 @@
 "ertype": "int",
 "params": [
 {
+"etype": "int",
 "name": "iRowID",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iColID",
 "type": "int"
 }
@@ -7550,10 +7588,12 @@
 "ertype": "string",
 "params": [
 {
+"etype": "int",
 "name": "iRowID",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iColID",
 "type": "int"
 }
@@ -7758,10 +7798,12 @@
 "ertype": "string",
 "params": [
 {
+"etype": "int",
 "name": "x",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "y",
 "type": "int"
 }
@@ -7925,6 +7967,7 @@
 "ertype": "object",
 "params": [
 {
+"etype": "int",
 "name": "iPlr",
 "type": "int"
 }
@@ -8083,6 +8126,7 @@
 "ertype": "any",
 "params": [
 {
+"etype": "int",
 "name": "iVarIndex",
 "type": "int"
 }
@@ -8160,10 +8204,12 @@
 "ertype": "int",
 "params": [
 {
+"etype": "int",
 "name": "iVal1",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iVal2",
 "type": "int"
 }
@@ -8242,10 +8288,12 @@
 "ertype": "any",
 "params": [
 {
+"etype": "&int",
 "name": "Value",
-"type": "&any"
+"type": "&int"
 },
 {
+"etype": "any",
 "name": "Diff",
 "type": "any"
 }
@@ -8261,6 +8309,7 @@
 "ertype": "any",
 "params": [
 {
+"etype": "int",
 "name": "iVarIndex",
 "type": "int"
 }
@@ -8599,10 +8648,12 @@
 "ertype": "int",
 "params": [
 {
+"etype": "int",
 "name": "iVal1",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iVal2",
 "type": "int"
 }
@@ -8641,10 +8692,12 @@
 "ertype": "any",
 "params": [
 {
+"etype": "int",
 "name": "iIndex",
 "type": "int"
 },
 {
+"etype": "object",
 "name": "pObj",
 "type": "object"
 }
@@ -8942,10 +8995,12 @@
 "ertype": "int",
 "params": [
 {
+"etype": "int",
 "name": "iVal1",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iVal2",
 "type": "int"
 }
@@ -8961,10 +9016,12 @@
 "ertype": "int",
 "params": [
 {
+"etype": "int",
 "name": "iClr1",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iClr2",
 "type": "int"
 }
@@ -8980,10 +9037,12 @@
 "ertype": "int",
 "params": [
 {
+"etype": "int",
 "name": "iVal1",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iVal2",
 "type": "int"
 }
@@ -9049,6 +9108,7 @@
 "ertype": "bool",
 "params": [
 {
+"etype": "bool",
 "name": "fCondition",
 "type": "bool"
 }
@@ -9377,14 +9437,17 @@
 "ertype": "bool",
 "params": [
 {
+"etype": "object",
 "name": "pObj",
 "type": "object"
 },
 {
+"etype": "int",
 "name": "iForPlr",
 "type": "int"
 },
 {
+"etype": "string",
 "name": "szAnswerString",
 "type": "string"
 }
@@ -9400,22 +9463,27 @@
 "ertype": "bool",
 "params": [
 {
+"etype": "bool",
 "name": "fCon1",
 "type": "bool"
 },
 {
+"etype": "bool",
 "name": "fCon2",
 "type": "bool"
 },
 {
+"etype": "bool",
 "name": "fCon3",
 "type": "bool"
 },
 {
+"etype": "bool",
 "name": "fCon4",
 "type": "bool"
 },
 {
+"etype": "bool",
 "name": "fCon5",
 "type": "bool"
 }
@@ -9466,18 +9534,22 @@
 "ertype": "bool",
 "params": [
 {
+"etype": "&int",
 "name": "X1",
-"type": "&any"
+"type": "&int"
 },
 {
+"etype": "&int",
 "name": "Y1",
-"type": "&any"
+"type": "&int"
 },
 {
+"etype": "int",
 "name": "X2",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "Y2",
 "type": "int"
 }
@@ -9493,6 +9565,7 @@
 "ertype": "void",
 "params": [
 {
+"etype": "bool",
 "name": "fToggle",
 "type": "bool"
 }
@@ -10202,10 +10275,12 @@
 "ertype": "int",
 "params": [
 {
+"etype": "string",
 "name": "szString1",
 "type": "string"
 },
 {
+"etype": "string",
 "name": "szString2",
 "type": "string"
 }
@@ -10362,10 +10437,12 @@
 "ertype": "any",
 "params": [
 {
+"etype": "&any",
 "name": "Dest",
 "type": "&any"
 },
 {
+"etype": "any",
 "name": "Src",
 "type": "any"
 }
@@ -11062,10 +11139,12 @@
 "ertype": "any",
 "params": [
 {
+"etype": "int",
 "name": "iVarIndex",
 "type": "int"
 },
 {
+"etype": "any",
 "name": "iValue",
 "type": "any"
 }
@@ -11250,10 +11329,12 @@
 "ertype": "bool",
 "params": [
 {
+"etype": "int",
 "name": "iScore",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "idPlayer",
 "type": "int"
 }
@@ -11269,10 +11350,12 @@
 "ertype": "bool",
 "params": [
 {
+"etype": "string",
 "name": "pNewData",
 "type": "string"
 },
 {
+"etype": "int",
 "name": "idPlayer",
 "type": "int"
 }
@@ -11289,7 +11372,7 @@
 "params": [
 {
 "desc": "Array of which the length is to be changed",
-"etype": "&any",
+"etype": "&array",
 "name": "aResize",
 "type": "array"
 },
@@ -11311,14 +11394,17 @@
 "ertype": "any",
 "params": [
 {
+"etype": "int",
 "name": "iVarIndex",
 "type": "int"
 },
 {
+"etype": "any",
 "name": "iValue",
 "type": "any"
 },
 {
+"etype": "object",
 "name": "pObj",
 "type": "object"
 }
@@ -11374,42 +11460,52 @@
 "ertype": "bool",
 "params": [
 {
+"etype": "int",
 "name": "iMat",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iClr1R",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iClr1G",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iClr1B",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iClr2R",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iClr2G",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iClr2B",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iClr3R",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iClr3G",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iClr3B",
 "type": "int"
 }
@@ -11494,10 +11590,12 @@
 "ertype": "bool",
 "params": [
 {
+"etype": "int",
 "name": "iNewProgress",
 "type": "int"
 },
 {
+"etype": "object",
 "name": "pMenuObj",
 "type": "object"
 }
@@ -11642,42 +11740,52 @@
 "ertype": "bool",
 "params": [
 {
+"etype": "int",
 "name": "iA",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iB",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iC",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iD",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iE",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iF",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iG",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iH",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iI",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iOverlayID",
 "type": "int"
 }
@@ -12260,10 +12368,12 @@
 "ertype": "bool",
 "params": [
 {
+"etype": "int",
 "name": "iToVal",
 "type": "int"
 },
 {
+"etype": "string",
 "name": "pNewName",
 "type": "string"
 }
@@ -12464,18 +12574,22 @@
 "ertype": "void",
 "params": [
 {
+"etype": "int",
 "name": "iIndex",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iRed",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iGreen",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iBlue",
 "type": "int"
 }
@@ -12491,26 +12605,32 @@
 "ertype": "void",
 "params": [
 {
+"etype": "int",
 "name": "iFromRed",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iFromGreen",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iFromBlue",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iToRed",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iToGreen",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iToBlue",
 "type": "int"
 }
@@ -12649,14 +12769,17 @@
 "ertype": "int",
 "params": [
 {
+"etype": "string",
 "name": "psMatTex",
 "type": "string"
 },
 {
+"etype": "int",
 "name": "iNewIndex",
 "type": "int"
 },
 {
+"etype": "bool",
 "name": "fInsert",
 "type": "bool"
 }
@@ -12713,10 +12836,12 @@
 "ertype": "any",
 "params": [
 {
+"etype": "int",
 "name": "iVarIndex",
 "type": "int"
 },
 {
+"etype": "any",
 "name": "iValue",
 "type": "any"
 }
@@ -13057,25 +13182,25 @@
 "params": [
 {
 "desc": "X coordinate of the starting position. Always global.",
-"etype": "&any",
+"etype": "&int",
 "name": "iX",
 "type": "int &"
 },
 {
 "desc": "Y coordinate of the starting position. Always global.",
-"etype": "&any",
+"etype": "&int",
 "name": "iY",
 "type": "int &"
 },
 {
 "desc": "Initial horizontal speed.",
-"etype": "&any",
+"etype": "&int",
 "name": "iXDir",
 "type": "int &"
 },
 {
 "desc": "Initial vertical speed.",
-"etype": "&any",
+"etype": "&int",
 "name": "iYDir",
 "type": "int &"
 },
@@ -13378,18 +13503,22 @@
 "ertype": "int",
 "params": [
 {
+"etype": "int",
 "name": "iVal1",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iVal2",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iVal3",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iVal4",
 "type": "int"
 }
@@ -13405,18 +13534,22 @@
 "ertype": "int",
 "params": [
 {
+"etype": "int",
 "name": "iVal1",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iVal2",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iVal3",
 "type": "int"
 },
 {
+"etype": "int",
 "name": "iVal4",
 "type": "int"
 }
@@ -13432,6 +13565,7 @@
 "ertype": "bool",
 "params": [
 {
+"etype": "int",
 "name": "iPlr",
 "type": "int"
 }
@@ -13539,6 +13673,7 @@
 "ertype": "any",
 "params": [
 {
+"etype": "int",
 "name": "iVarIndex",
 "type": "int"
 }

@@ -24,6 +24,10 @@ TYPE_MAP = {
 RTYPE_MAP = {**TYPE_MAP, "C4Value": "any", "void": "void", "C4AulDefFunc": "any"}
 
 
+# engine functions writing into their reference parameters: the type written (FnInc, FnPathFree2, FnSimFlight, ...)
+REF_WRITES = {"Inc": "int", "Dec": "int", "PathFree2": "int", "SimFlight": "int", "SetLength": "array"}
+
+
 def parse_engine(src_dir):
     s = open(os.path.join(src_dir, "C4Script.cpp"), encoding="cp1252").read()
     # C++ function definitions: "[static] <rtype> FnName(<params>) [// comment]\n{"
@@ -50,6 +54,11 @@ def parse_engine(src_dir):
     vtypes = {"C4Object": "object", "Int": "int", "Bool": "bool", "Array": "array", "C4ID": "id", "String": "string"}
     for vt, name in re.findall(r'new C4AulEngineFuncParArray<\d+, C4V_(\w+)>\s*\{pEngine, "(\w+)"', s):
         funcs[name] = {"params": [{"name": f"criteria{i + 1}", "type": "array"} for i in range(10)], "rtype": vtypes.get(vt, "any")}
+    # reference parameters (C4Value *): what the engine writes into them (C4Script.cpp); Set writes its 2nd argument
+    for name, wrote in REF_WRITES.items():
+        for p in funcs[name]["params"]:
+            if p["type"] == "&any":
+                p["type"] = "&" + wrote
     # Cast functions: CastInt(x), ScoreboardCol(id), ...
     for to_type, name in re.findall(r'new C4AulDefCastFunc<\w+, C4V_(\w+)>\{pEngine, "(\w+)"\}', s):
         funcs[name] = {"params": [{"name": "value", "type": "any"}],
@@ -277,10 +286,11 @@ def main():
     for name, f in sorted(funcs.items()):
         d = docs.get(name, {})
         params = f["params"]
+        for p in params or []:
+            p["etype"] = p["type"]  # the type the engine converts to (C++ signature); "type" is the documented one
         if params is not None and d.get("params"):
             # engine gives count/types; docs give nicer names and descriptions
             for i, p in enumerate(params):
-                p["etype"] = p["type"]  # the type the engine converts to (C++ signature); "type" is the documented one
                 if i < len(d["params"]):
                     dp = d["params"][i]
                     p["name"] = dp["name"] or p["name"]

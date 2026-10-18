@@ -9,7 +9,7 @@ use tree_sitter::{Node, Parser, Tree};
 #[derive(Debug, Clone)]
 pub struct FuncDef {
     pub name: String,
-    /// (type, name)
+    /// (type, name); type "&" = a reference parameter (`&x`, `int &x`: the engine drops the type, C4AulParse)
     pub params: Vec<(Option<String>, String)>,
     pub visibility: Option<String>,
     pub name_range: Range,
@@ -23,6 +23,7 @@ impl FuncDef {
             .params
             .iter()
             .map(|(t, n)| match t {
+                Some(t) if t == "&" => format!("&{}", n),
                 Some(t) => format!("{} {}", t, n),
                 None => n.clone(),
             })
@@ -340,6 +341,11 @@ pub fn for_in_vars<'t>(n: &Node<'t>) -> Vec<Node<'t>> {
     kids[..at].iter().filter(|c| c.kind() == "identifier").copied().collect()
 }
 
+/// `&x` / `int &x`: a reference parameter.
+pub fn is_ref_param(p: &Node) -> bool {
+    children(p).iter().any(|c| c.kind() == "&")
+}
+
 pub fn is_arrow_call(call: &Node) -> bool {
     match call.parent() {
         Some(p) if p.kind() == "arrow_expression" => named_children(&p).first().map(|f| f.id() != call.id()).unwrap_or(false),
@@ -385,7 +391,7 @@ pub fn extract(path: &Path, src: &str, tree: &Tree) -> FileInfo {
                         if c.kind() == "parameter_list" {
                             for p in named_children(&c).into_iter().filter(|p| p.kind() == "param") {
                                 if let Some(pn) = p.child_by_field_name("name") {
-                                    let ty = p.child_by_field_name("type").map(|t| node_text(&t, src).to_string());
+                                    let ty = if is_ref_param(&p) { Some("&".to_string()) } else { p.child_by_field_name("type").map(|t| node_text(&t, src).to_string()) };
                                     params.push((ty, node_text(&pn, src).to_string()));
                                 }
                             }

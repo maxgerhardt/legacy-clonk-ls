@@ -348,7 +348,8 @@ impl<'a> Ctx<'a> {
                 "bool" => "a bool",
                 _ => continue,
             };
-            if !matches!(p.ty.as_str(), "object" | "string" | "array" | "map") {
+            // a reference parameter takes no value at all (arg-type reports it)
+            if !matches!(p.ty.as_str(), "object" | "string" | "array" | "map") || p.etype.starts_with('&') {
                 continue;
             }
             let text = node_text(arg, self.src);
@@ -370,6 +371,23 @@ impl<'a> Ctx<'a> {
         let Some(args) = call.child_by_field_name("args") else { return };
         let args: Vec<Node> = named_children(&args).into_iter().filter(|c| c.kind() != "comment").collect();
         for (i, (arg, (ty, pname))) in args.iter().zip(params.iter()).enumerate() {
+            if ty.starts_with('&') {
+                // a reference parameter takes a variable, an array element or a map entry (C4AulExec: "expected &")
+                let got = match arg.kind() {
+                    "nil" => Some(("nil", false)),
+                    "identifier" if node_text(arg, self.src) != "this" => None,
+                    _ => self.static_type(arg),
+                };
+                if let Some((got, truthy)) = got {
+                    if truthy || self.strict >= 3 {
+                        self.out.push(diag(self.li.node_range(arg), DiagnosticSeverity::ERROR, "arg-type",
+                            format!("call to \"{}\" parameter {}: got \"{}\", but expected \"&\" (&{}: a variable, a[i] or m.key): fails at runtime",
+                                name, i + 1, got, pname)));
+                        break;
+                    }
+                }
+                continue;
+            }
             let got = match self.static_type(arg) {
                 Some((got, truthy)) => {
                     if !truthy && self.strict < 3 {
