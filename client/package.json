@@ -57,6 +57,17 @@
 					"type": "string",
 					"description": "Path to game executable, which is used to run scenarios"
 				},
+				"legacy-clonk-ext.stringTableLanguages": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"default": [
+						"DE",
+						"US"
+					],
+					"description": "Languages your string tables ($Name$ -> StringTbl<Language>.txt) must cover, in this order, e.g. [\"DE\", \"US\", \"ES\"]. Empty: DE and US."
+				},
 				"legacy-clonk-ext.typeChecks": {
 					"type": "boolean",
 					"default": true,
@@ -152,13 +163,22 @@
 						"meta.type.annotation"
 					],
 					"id": [
-						"variable.language.this"
+						"entity.name.type.class"
 					],
 					"bool": [
 						"constant.language.boolean"
 					],
 					"thisKeyword": [
 						"variable.language.this"
+					],
+					"controlKeyword": [
+						"keyword.control"
+					],
+					"formatPlaceholder": [
+						"constant.other.placeholder"
+					],
+					"stringEscape": [
+						"constant.character.escape"
 					]
 				}
 			},
@@ -182,9 +202,9 @@
 				"superType": "type"
 			},
 			{
-				"description": "IDs in C4Script",
+				"description": "Definition IDs (C4Script's classes)",
 				"id": "id",
-				"superType": "keyword"
+				"superType": "class"
 			},
 			{
 				"description": "Booleans",
@@ -195,6 +215,21 @@
 				"description": "this (the object the script runs in)",
 				"id": "thisKeyword",
 				"superType": "keyword"
+			},
+			{
+				"description": "Control flow keywords: if, else, for, while, in, return, break, continue",
+				"id": "controlKeyword",
+				"superType": "keyword"
+			},
+			{
+				"description": "Format placeholders in format strings (%d %s %v %i %x %c)",
+				"id": "formatPlaceholder",
+				"superType": "string"
+			},
+			{
+				"description": "Escape sequences in strings",
+				"id": "stringEscape",
+				"superType": "string"
 			}
 		]
 	},

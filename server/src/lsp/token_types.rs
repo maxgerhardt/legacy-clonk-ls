@@ -18,4 +18,14 @@ pub struct TokenTypes {
     pub enum_member: u32,
     /// `this`: own type thisKeyword (scope variable.language.this)
     pub this_kw: u32,
+    /// if/else/for/while/in/return/break/continue: controlKeyword (keyword.control, like C#)
+    pub control_kw: u32,
+    /// function-local variables (declaration and use): variable
+    pub variable: u32,
+    /// object locals and statics of the script: property (C# fields)
+    pub property: u32,
+    /// %d %s %v ... in format strings: formatPlaceholder (constant.other.placeholder)
+    pub placeholder: u32,
+    /// \" and \\ in strings: stringEscape (constant.character.escape)
+    pub escape: u32,
 }

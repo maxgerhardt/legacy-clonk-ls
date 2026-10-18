@@ -22,6 +22,9 @@ impl OwnSemanticTokenType {
     const ID: SemanticTokenType = SemanticTokenType::new("id");
     const BOOL: SemanticTokenType = SemanticTokenType::new("bool");
     const THIS: SemanticTokenType = SemanticTokenType::new("thisKeyword");
+    const CONTROL: SemanticTokenType = SemanticTokenType::new("controlKeyword");
+    const PLACEHOLDER: SemanticTokenType = SemanticTokenType::new("formatPlaceholder");
+    const ESCAPE: SemanticTokenType = SemanticTokenType::new("stringEscape");
 }
 const NEGOTIATE_TOKENT_TYPES: bool = false;
 const LOG_TREE_UPDATE_POSITIONS: bool = false;
@@ -71,8 +74,15 @@ impl Backend {
             operator: 0, // TODO
             enum_member: 8,
             this_kw: 4,
+            variable: 9,
+            property: 10,
+            control_kw: 4,
+            placeholder: 1,
+            escape: 1,
         };
         negotiated.push(SemanticTokenType::ENUM_MEMBER); // index 8: engine constants, static consts
+        negotiated.push(SemanticTokenType::VARIABLE); // 9: function-local variables
+        negotiated.push(SemanticTokenType::PROPERTY); // 10: object locals/statics
 
         // Set additional custom tokens
         if NEGOTIATE_TOKENT_TYPES {
@@ -105,6 +115,12 @@ impl Backend {
             negotiated.push(OwnSemanticTokenType::BOOL);
             lut.this_kw = (negotiated.len()) as u32;
             negotiated.push(OwnSemanticTokenType::THIS);
+            lut.control_kw = (negotiated.len()) as u32;
+            negotiated.push(OwnSemanticTokenType::CONTROL);
+            lut.placeholder = (negotiated.len()) as u32;
+            negotiated.push(OwnSemanticTokenType::PLACEHOLDER);
+            lut.escape = (negotiated.len()) as u32;
+            negotiated.push(OwnSemanticTokenType::ESCAPE);
         }
 
         let legend = SemanticTokensLegend {
@@ -354,6 +370,9 @@ impl LanguageServer for Backend {
                 game_dir = Some(std::path::PathBuf::from(g));
             }
             all_packs = opts.get("allPacks").and_then(|v| v.as_bool()).unwrap_or(false);
+            if let Some(langs) = opts.get("stringTableLanguages").and_then(|v| v.as_array()) {
+                legacy_clonk_ls::analysis::strings::set_languages(langs.iter().filter_map(|l| l.as_str().map(|s| s.to_string())).collect());
+            }
             if let Some(tc) = opts.get("typeChecks").and_then(|v| v.as_bool()) {
                 legacy_clonk_ls::analysis::diagnostics::TYPE_CHECKS.store(tc, std::sync::atomic::Ordering::Relaxed);
             }

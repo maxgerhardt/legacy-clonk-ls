@@ -50,7 +50,10 @@ function configureAndStartLanguageServer(context: ExtensionContext) {
 	// The game folder lets the server index the packs scenarios load (Objects.c4d, Knights.c4d, ...)
 	const gameExecutable = workspace.getConfiguration(CONFIG_NAME).get<string>('pathToGameExecutable');
 	const typeChecks = workspace.getConfiguration(CONFIG_NAME).get<boolean>('typeChecks', true);
-	const initializationOptions = gameExecutable ? { gameDir: path.dirname(gameExecutable), typeChecks } : { typeChecks };
+	const stringTableLanguages = workspace.getConfiguration(CONFIG_NAME).get<string[]>('stringTableLanguages', ['DE', 'US']);
+	const initializationOptions = gameExecutable
+		? { gameDir: path.dirname(gameExecutable), typeChecks, stringTableLanguages }
+		: { typeChecks, stringTableLanguages };
 
 	const serverOptions: ServerOptions = {
 		run: {

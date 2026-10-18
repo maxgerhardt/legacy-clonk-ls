@@ -10,6 +10,23 @@
 use super::text::decode_bytes;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::RwLock;
+
+lazy_static::lazy_static! {
+    /// languages to check (setting stringTableLanguages, e.g. DE, US, ES); empty setting = DE, US
+    static ref LANGUAGES: RwLock<Vec<String>> = RwLock::new(Vec::new());
+}
+
+pub fn set_languages(langs: Vec<String>) {
+    if let Ok(mut l) = LANGUAGES.write() {
+        *l = langs.into_iter().map(|x| x.trim().to_uppercase()).filter(|x| !x.is_empty()).collect();
+    }
+}
+
+pub fn languages() -> Vec<String> {
+    let l = LANGUAGES.read().map(|l| l.clone()).unwrap_or_default();
+    if l.is_empty() { vec!["DE".to_string(), "US".to_string()] } else { l }
+}
 
 /// C4MaxName
 const MAX_NAME: usize = 30;
@@ -43,7 +60,10 @@ pub fn tables_for(script: &Path) -> Vec<StringTable> {
         }
         out.push(StringTable { lang, path: e.path(), entries });
     }
-    out.sort_by(|a, b| a.lang.cmp(&b.lang));
+    let langs = languages();
+    // only the configured languages (and a language-neutral StringTbl.txt), in their order
+    out.retain(|t| t.lang.is_empty() || langs.contains(&t.lang.to_uppercase()));
+    out.sort_by_key(|t| langs.iter().position(|l| *l == t.lang.to_uppercase()).unwrap_or(usize::MAX));
     out
 }
 
@@ -88,6 +108,11 @@ pub fn hover(script: &Path, name: &str) -> String {
         return format!("**${}$** - no StringTbl*.txt next to this script: the engine warns \"string table entry not found\"", name);
     }
     let mut s = format!("**${}$** *(string table)*", name);
+    for l in languages() {
+        if !tables.iter().any(|t| t.lang.to_uppercase() == l) {
+            s.push_str(&format!("\n- **{}**: *no StringTbl{}.txt here (the engine falls back to the next language)*", l, l));
+        }
+    }
     for t in &tables {
         let lang = if t.lang.is_empty() { "all languages".to_string() } else { t.lang.clone() };
         match t.entries.get(name) {
