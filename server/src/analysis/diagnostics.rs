@@ -46,7 +46,7 @@ pub fn diagnose(index: &Index, info: &FileInfo, src: &str, tree: &Tree) -> Vec<D
     if lint_enabled() {
         let root = tree.root_node();
         super::lint::unused_vars(&root, src, &li, &mut out);
-        super::lint::unreachable(&root, &li, &mut out);
+        super::lint::unreachable(&root, src, &li, &mut out);
         super::lint::unused_funcs(index, info, &mut out);
         super::lint::unused_script_vars(index, info, &mut out);
     }

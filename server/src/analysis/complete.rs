@@ -320,6 +320,22 @@ pub fn complete(index: &Index, info: &FileInfo, src: &str, pos: Position, trigge
     let line = &src[line_start..start];
     let mut items = Items { out: vec![], seen: HashSet::new(), paren_follows: src[at..].trim_start().starts_with('(') };
 
+    // `// NOLINT(`, `// c4lint: ignore(`: the diagnostic codes (lint.rs suppression comments)
+    let to_cursor = &src[line_start..start];
+    if let Some(c) = to_cursor.find("//").or_else(|| to_cursor.rfind("/*")).map(|i| &to_cursor[i..]) {
+        if let Some(open) = c.rfind('(') {
+            if !c[open..].contains(')') && (c[..open].contains("NOLINT") || c[..open].contains("c4lint:")) {
+                for (code, what) in super::lint::CODES {
+                    items.add(code, CompletionItemKind::ENUM_MEMBER, what.to_string(), None, 0);
+                }
+                return Some(items.out);
+            }
+        }
+    }
+    // '(' / ',' only complete inside NOLINT(...) (signature help handles calls)
+    if matches!(trigger, Some("(") | Some(",")) {
+        return None;
+    }
     // inside a comment or string?
     let toks_line = lex(line);
     if in_block_comment(&src[..start]) {

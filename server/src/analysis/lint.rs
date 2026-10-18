@@ -10,6 +10,32 @@ use std::collections::{HashMap, HashSet};
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString};
 use tree_sitter::Node;
 
+/// Every diagnostic code with a short description (completion inside `// NOLINT(`).
+pub const CODES: &[(&str, &str)] = &[
+    ("syntax", "syntax error"),
+    ("strict", "#strict level: syntax the level doesn't allow"),
+    ("no-strict", "no #strict directive"),
+    ("unknown-identifier", "unknown function or variable"),
+    ("unknown-id", "unknown definition ID"),
+    ("unknown-method", "obj->F(): no indexed script defines F"),
+    ("direct-call", "obj->F() without ~: no loaded script or engine function F"),
+    ("member-call", "obj->F(): the object's definition has no F"),
+    ("too-many-params", "more parameters than the function takes"),
+    ("arg-type", "an argument the engine can't convert"),
+    ("op-type", "an operand the engine can't use (nil in #strict 3, never an int)"),
+    ("strict3-nothing", "0/false passed for an object/string/array in #strict 3"),
+    ("nil-call", "obj->F() where obj may be nil (nilChecks)"),
+    ("inherited", "inherited() without an overloaded function"),
+    ("id-label", "a name that looks like an ID before ( or :"),
+    ("local-in-global", "a local used in a global func"),
+    ("string-table", "$Name$ not in the string table"),
+    ("unused-var", "a var that is never read"),
+    ("unused-param", "a parameter of a private function that is never used"),
+    ("unused-local", "a local/static no script reads"),
+    ("unused-func", "a private function nothing calls"),
+    ("unreachable", "code that never runs"),
+];
+
 /// Codes suppressed per line (None = all codes), and for the whole file.
 #[derive(Default)]
 pub struct Suppressions {
@@ -141,6 +167,8 @@ fn check_function_vars(func: &Node, src: &str, li: &LineIndex, out: &mut Vec<Dia
                     loop_vars.insert(node_text(&v, src).to_string());
                 }
             }
+            // a parameter's declaration is no read
+            "param" => continue,
             "method_call" if n.child_by_field_name("name").map(|x| node_text(&x, src) == "Var").unwrap_or(false) => by_index = true,
             "binary_expression" if op(&n) == "=" => {
                 let nc: Vec<Node> = named_children(&n).into_iter().filter(|c| c.kind() != "comment").collect();
@@ -159,6 +187,24 @@ fn check_function_vars(func: &Node, src: &str, li: &LineIndex, out: &mut Vec<Dia
     }
     if by_index {
         return; // Var(n) reads variables by their index
+    }
+    // unused-param (info): only private functions (their callers are all scripts we see; engine callbacks and
+    // public functions have fixed signatures), not with Par(n) (reads parameters by index)
+    let private = func.child_by_field_name("visibility").map(|v| node_text(&v, src) == "private").unwrap_or(false);
+    let body = node_text(func, src);
+    let callback = func.child_by_field_name("name").map(|x| super::callers::is_callback(node_text(&x, src))).unwrap_or(false);
+    if private && !callback && !body.contains("Par(") {
+        if let Some(pl) = named_children(func).into_iter().find(|c| c.kind() == "parameter_list") {
+            for p in named_children(&pl).into_iter().filter(|c| c.kind() == "param") {
+                let Some(pn) = p.child_by_field_name("name") else { continue };
+                let name = node_text(&pn, src);
+                if name.starts_with('_') || reads.contains(name) || assigned.contains(name) {
+                    continue;
+                }
+                out.push(diag(li.node_range(&pn), DiagnosticSeverity::INFORMATION, "unused-param",
+                    format!("parameter \"{}\" is never used (private function: remove it here and in the calls, or name it _{})", name, name)));
+            }
+        }
     }
     for (name, id) in decls {
         if name.starts_with('_') || loop_vars.contains(&name) || reads.contains(&name) {
@@ -218,11 +264,32 @@ fn exits(s: &Node) -> bool {
 }
 
 /// unreachable: statements after one that always leaves its block.
-pub fn unreachable(root: &Node, li: &LineIndex, out: &mut Vec<Diagnostic>) {
+pub fn unreachable(root: &Node, src: &str, li: &LineIndex, out: &mut Vec<Diagnostic>) {
     let mut stack = vec![*root];
     while let Some(n) = stack.pop() {
         if n.kind() == "old_function_definition" {
             continue; // old-style labels: the next label starts a new function
+        }
+        // if (false) / if (0) / while (0): the body never runs; if (true) ... else: the else never runs
+        if matches!(n.kind(), "if_statement" | "while_statement") {
+            let parts: Vec<Node> = named_children(&n).into_iter().filter(|c| !matches!(c.kind(), "comment" | "else")).collect();
+            if let Some(cond) = parts.first() {
+                let truth = match cond.kind() {
+                    "bool" => Some(node_text(cond, src) == "true"),
+                    "nil" => Some(false),
+                    "number" => Some(node_text(cond, src).trim_start_matches('0') != ""),
+                    _ => None,
+                };
+                let dead = match truth {
+                    Some(false) => parts.get(1),
+                    Some(true) if n.kind() == "if_statement" => parts.get(2),
+                    _ => None,
+                };
+                if let Some(d) = dead {
+                    let why = if truth == Some(false) { "the condition is always false" } else { "the condition is always true, so the else never runs" };
+                    out.push(diag(li.node_range(d), DiagnosticSeverity::WARNING, "unreachable", format!("unreachable code: {}", why)));
+                }
+            }
         }
         if n.kind() == "block" {
             let stmts: Vec<Node> = named_children(&n).into_iter().filter(|c| c.kind() != "comment").collect();

@@ -467,7 +467,7 @@ impl LanguageServer for Backend {
                     ..Default::default()
                 }),
                 completion_provider: Some(CompletionOptions {
-                    trigger_characters: Some([">", ".", "#", "$", "~", "[", "=", "|", ";"].iter().map(|s| s.to_string()).collect()),
+                    trigger_characters: Some([">", ".", "#", "$", "~", "[", "=", "|", ";", "(", ","].iter().map(|s| s.to_string()).collect()),
                     ..Default::default()
                 }),
                 ..Default::default()
