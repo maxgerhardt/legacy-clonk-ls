@@ -106,6 +106,8 @@ struct Lookup {
     statics: HashMap<String, Vec<(String, usize)>>,
     /// #appendto target ID (or "*") -> scripts appending to it
     appenders: HashMap<String, Vec<String>>,
+    /// lowercase names of the .c4d/.c4f folders that indexed scripts lie in (which packs are indexed)
+    pack_dirs: HashSet<String>,
 }
 
 impl Lookup {
@@ -127,6 +129,12 @@ impl Lookup {
             }
             for t in &f.appendto {
                 l.appenders.entry(t.clone()).or_default().push(key.clone());
+            }
+            for seg in key.split('/') {
+                let seg = seg.to_lowercase();
+                if seg.ends_with(".c4d") || seg.ends_with(".c4f") {
+                    l.pack_dirs.insert(seg);
+                }
             }
         }
         l
@@ -549,6 +557,19 @@ impl Index {
         // System.c4g of the game (not of a scenario folder or a pack: a pack's System.c4g counts only if the
         // scenario loads that pack, checked above)
         tk.contains("/system.c4g/") && prefix_through(&tk, ".c4f", false).is_none() && prefix_through(&tk, ".c4d", false).is_none()
+    }
+
+    /// Is every pack that the scenario of `from` loads indexed, so its loaded functions are completely known?
+    /// Scripts outside scenarios: unknown which scenario loads them -> false.
+    pub fn scope_packs_indexed(&self, from: &Path) -> bool {
+        let scen = match prefix_through(&path_key(from), ".c4s", true) {
+            Some(s) => s,
+            None => return false,
+        };
+        let default_packs = vec!["objects.c4d".to_string()];
+        let packs = self.scenario_packs.get(&scen).unwrap_or(&default_packs);
+        let lk = self.lookup();
+        packs.iter().all(|p| lk.pack_dirs.contains(&p.rsplit('/').next().unwrap_or(p).to_lowercase()))
     }
 
     /// Does the scenario of script `from` load the pack with this file name (e.g. "Knights.c4d")?

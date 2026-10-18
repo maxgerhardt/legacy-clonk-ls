@@ -187,10 +187,21 @@ impl<'a> Ctx<'a> {
         let args = n.child_by_field_name("args").map(|a| named_children(&a).iter().filter(|c| c.kind() != "comment").count()).unwrap_or(0);
         let range = self.li.node_range(&name_node);
         if super::index::is_arrow_call(n) {
-            // resolved at runtime; only hint if no script defines it at all
-            if self.index.reachable_funcs(&self.info.path, name).is_empty() && !ENGINE.functions.contains_key(name) {
-                self.out.push(diag(range, DiagnosticSeverity::INFORMATION, "unknown-method",
-                    format!("no indexed script defines a function '{}' (called via ->)", name)));
+            // resolved at runtime, but the engine checks at compile time that some loaded script (or the engine)
+            // has a function of that name: obj->F() without '~' is "direct object call: function F not found"
+            // (C4AulParse: Engine->GetFirstFunc). ID::F() calls are checked differently: skip them.
+            if n.child_by_field_name("id").is_none()
+                && self.index.reachable_funcs(&self.info.path, name).is_empty()
+                && !ENGINE.functions.contains_key(name)
+            {
+                let failsafe = n.parent().map(|p| super::index::children(&p).iter().any(|c| c.kind() == "~")).unwrap_or(false);
+                if !failsafe && self.index.scope_packs_indexed(&self.info.path) {
+                    self.out.push(diag(range, DiagnosticSeverity::ERROR, "direct-call",
+                        format!("direct object call: function {} not found (no script this scenario loads defines it; ->~{}() calls it only if it exists)", name, name)));
+                } else {
+                    self.out.push(diag(range, DiagnosticSeverity::INFORMATION, "unknown-method",
+                        format!("no indexed script defines a function '{}' (called via ->)", name)));
+                }
             }
             return;
         }
