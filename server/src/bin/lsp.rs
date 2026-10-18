@@ -467,6 +467,7 @@ impl LanguageServer for Backend {
                 definition_provider: Some(OneOf::Left(true)),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 inlay_hint_provider: Some(OneOf::Left(true)),
+                document_highlight_provider: Some(OneOf::Left(true)),
                 rename_provider: Some(OneOf::Right(RenameOptions { prepare_provider: Some(true), work_done_progress_options: Default::default() })),
                 references_provider: Some(OneOf::Left(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
@@ -663,6 +664,17 @@ impl LanguageServer for Backend {
                 Ok(None)
             }
         }
+    }
+
+    /// Occurrences of the symbol under the cursor in this script (variables within their function, functions and
+    /// IDs by name, map keys within the function).
+    async fn document_highlight(&self, params: DocumentHighlightParams) -> Result<Option<Vec<DocumentHighlight>>> {
+        let p = params.text_document_position_params;
+        let uri = p.text_document.uri;
+        let locs = self.with_script(&uri, |idx, info, doc| query::references(idx, info, &doc.tree, &doc.source, p.position, true)).unwrap_or_default();
+        let hl: Vec<DocumentHighlight> = locs.into_iter().filter(|l| l.uri == uri)
+            .map(|l| DocumentHighlight { range: l.range, kind: Some(DocumentHighlightKind::TEXT) }).collect();
+        Ok((!hl.is_empty()).then_some(hl))
     }
 
     /// Inferred types as inlay hints (`var x: int`, `func F() -> string`); VS Code's editor.inlayHints.enabled
