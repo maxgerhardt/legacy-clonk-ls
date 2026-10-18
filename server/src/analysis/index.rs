@@ -332,6 +332,14 @@ pub fn is_map_key(node: &Node) -> bool {
     }
 }
 
+/// The loop variables of `for ([var] x in a)` / `for ([var] k, v in m)`: the identifiers before `in` (the
+/// collection after it can be a plain name too).
+pub fn for_in_vars<'t>(n: &Node<'t>) -> Vec<Node<'t>> {
+    let kids = children(n);
+    let Some(at) = kids.iter().position(|c| c.kind() == "in") else { return vec![] };
+    kids[..at].iter().filter(|c| c.kind() == "identifier").copied().collect()
+}
+
 pub fn is_arrow_call(call: &Node) -> bool {
     match call.parent() {
         Some(p) if p.kind() == "arrow_expression" => named_children(&p).first().map(|f| f.id() != call.id()).unwrap_or(false),
@@ -459,7 +467,7 @@ fn function_writes(f: &Node, src: &str) -> Vec<(String, bool)> {
                 }
             }
             "for_statement" if children(&n).iter().any(|c| c.kind() == "var") => {
-                for id in named_children(&n).into_iter().take_while(|c| c.kind() == "identifier") {
+                for id in for_in_vars(&n) {
                     locals.insert(node_text(&id, src).to_string());
                 }
             }

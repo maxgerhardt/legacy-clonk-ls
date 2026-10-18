@@ -255,7 +255,7 @@ fn infer_at_depth(index: &Index, info: &FileInfo, src: &str, func: Node, strict:
         if n.kind() == "for_statement" {
             // for (var x in a) / for (var i, x in a)
             if children(&n).iter().any(|c| c.kind() == "in") && children(&n).iter().any(|c| c.kind() == "var") {
-                for id in named_children(&n).into_iter().take_while(|c| c.kind() == "identifier") {
+                for id in super::index::for_in_vars(&n) {
                     let name = node_text(&id, src).to_string();
                     inf.locals.insert(name.clone());
                     state.entry(name).or_insert(NIL);
