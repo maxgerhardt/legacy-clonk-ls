@@ -92,6 +92,15 @@ function configureAndStartLanguageServer(context: ExtensionContext) {
 
 	client.start();
 	client.info("Client started");
+
+	// the server reads these once (initializationOptions): offer a reload when one changes
+	const serverSettings = ['pathToGameExecutable', 'typeChecks', 'fieldTypes', 'objectIds', 'nilChecks', 'assumeCreateSucceeds', 'stringTableLanguages'];
+	context.subscriptions.push(workspace.onDidChangeConfiguration(e => {
+		if (serverSettings.some(s => e.affectsConfiguration(CONFIG_NAME + '.' + s))) {
+			window.showInformationMessage('Legacy Clonk: reload the window to apply the changed language server setting.', 'Reload Window')
+				.then(choice => { if (choice) { commands.executeCommand('workbench.action.reloadWindow'); } });
+		}
+	}));
 }
 
 function configureTreeViewCommands(context: ExtensionContext, outputChannel: OutputChannel) {
