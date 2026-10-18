@@ -414,6 +414,7 @@ impl LanguageServer for Backend {
                 semantic_tokens_provider: semantic_tokens_capabilities,
                 text_document_sync: Some(text_document_sync_capabilities),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                document_formatting_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
@@ -545,6 +546,36 @@ impl LanguageServer for Backend {
                 Ok(items.map(|i| CompletionResponse::Array(i)))
             }
             None => Ok(None),
+        }
+    }
+
+    /// Format Document: c4format with the rules of the nearest .c4format (one edit replacing the whole text).
+    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        let uri = params.text_document.uri;
+        let Some(doc) = self.documents.get(&uri) else { return Ok(None) };
+        if !matches!(doc.doc_type, DocType::Script) {
+            return Ok(None);
+        }
+        let src = doc.source.clone();
+        drop(doc);
+        let Some(path) = c4index::uri_to_path(&uri) else { return Ok(None) };
+        let style = match legacy_clonk_ls::analysis::format::Style::for_file(&path) {
+            Ok((s, _)) => s,
+            Err(e) => {
+                self.client.show_message(MessageType::ERROR, format!("c4format: {}", e)).await;
+                return Ok(None);
+            }
+        };
+        match legacy_clonk_ls::analysis::format::format_explain(&src, &style) {
+            Ok(text) if text != src => {
+                let lines = src.split('\n').count() as u32;
+                Ok(Some(vec![TextEdit { range: Range::new(Position::new(0, 0), Position::new(lines, 0)), new_text: text }]))
+            }
+            Ok(_) => Ok(Some(vec![])),
+            Err(reason) => {
+                self.client.show_message(MessageType::INFO, format!("c4format: left unchanged ({})", reason)).await;
+                Ok(None)
+            }
         }
     }
 

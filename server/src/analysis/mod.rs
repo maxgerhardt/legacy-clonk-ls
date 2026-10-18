@@ -2,6 +2,7 @@
 
 pub mod diagnostics;
 pub mod engine;
+pub mod format;
 pub mod index;
 pub mod query;
 pub mod strings;

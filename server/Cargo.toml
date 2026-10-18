@@ -36,3 +36,7 @@ path = "src/bin/lsp.rs"
 [[bin]]
 name = "c4check"
 path = "src/bin/c4check.rs"
+
+[[bin]]
+name = "c4format"
+path = "src/bin/c4format.rs"
