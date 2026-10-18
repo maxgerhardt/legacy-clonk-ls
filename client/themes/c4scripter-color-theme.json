@@ -1,0 +1,101 @@
+{
+  "$schema": "vscode://schemas/color-theme",
+  "name": "C4Scripter Classic",
+  "type": "light",
+  "semanticHighlighting": true,
+  "colors": {
+    "editor.background": "#FFFFFF",
+    "editor.foreground": "#000000",
+    "editorLineNumber.foreground": "#000000",
+    "editorLineNumber.activeForeground": "#000000",
+    "editor.lineHighlightBackground": "#F4F4F4",
+    "editorBracketMatch.background": "#BEBEBE",
+    "editorBracketMatch.border": "#808080"
+  },
+  "tokenColors": [
+    {
+      "scope": [
+        "comment",
+        "punctuation.definition.comment"
+      ],
+      "settings": {
+        "foreground": "#008000"
+      }
+    },
+    {
+      "scope": [
+        "string",
+        "constant.character.escape",
+        "constant.other.placeholder"
+      ],
+      "settings": {
+        "foreground": "#C00000"
+      }
+    },
+    {
+      "scope": [
+        "constant.numeric"
+      ],
+      "settings": {
+        "foreground": "#C00080"
+      }
+    },
+    {
+      "scope": [
+        "keyword",
+        "storage",
+        "storage.type",
+        "storage.modifier",
+        "constant.language",
+        "variable.language",
+        "keyword.control",
+        "support.type.primitive",
+        "meta.preprocessor"
+      ],
+      "settings": {
+        "foreground": "#0000FF"
+      }
+    },
+    {
+      "scope": [
+        "support.function"
+      ],
+      "settings": {
+        "foreground": "#0080C0"
+      }
+    },
+    {
+      "scope": [
+        "entity.name.function",
+        "variable",
+        "entity.name.type",
+        "variable.other.enummember",
+        "variable.other.constant"
+      ],
+      "settings": {
+        "foreground": "#000000"
+      }
+    }
+  ],
+  "semanticTokenColors": {
+    "comment": "#008000",
+    "string": "#C00000",
+    "formatPlaceholder": "#C00000",
+    "stringEscape": "#C00000",
+    "number": "#C00080",
+    "keyword": "#0000FF",
+    "controlKeyword": "#0000FF",
+    "thisKeyword": "#0000FF",
+    "bool": "#0000FF",
+    "macro": "#0000FF",
+    "parameterType": "#0000FF",
+    "type": "#0000FF",
+    "method": "#000000",
+    "method.defaultLibrary": "#0080C0",
+    "parameter": "#000000",
+    "variable": "#000000",
+    "property": "#000000",
+    "enumMember": "#000000",
+    "id": "#000000"
+  }
+}

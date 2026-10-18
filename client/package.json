@@ -23,6 +23,13 @@
 	"publisher": "LegacyClonkDev",
 	"main": "./client/out/extension",
 	"contributes": {
+		"themes": [
+			{
+				"label": "C4Scripter Classic",
+				"uiTheme": "vs",
+				"path": "./themes/c4scripter-color-theme.json"
+			}
+		],
 		"configuration": {
 			"type": "object",
 			"title": "Legacy Clonk",

@@ -125,7 +125,7 @@ impl Backend {
 
         let legend = SemanticTokensLegend {
             token_types: negotiated,
-            token_modifiers: vec![],
+            token_modifiers: vec![SemanticTokenModifier::DEFAULT_LIBRARY], // bit 0: engine functions
         };
 
         Some((lut, legend))

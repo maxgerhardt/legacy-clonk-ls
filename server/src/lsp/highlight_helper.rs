@@ -9,6 +9,8 @@ pub struct Context {
     pub last_line: u32,
     pub last_start: u32,
     pub token_types: TokenTypes,
+    /// modifier bits for the tokens added now (bit 0 = defaultLibrary: engine functions)
+    pub modifiers: u32,
 }
 
 pub fn add_semantic_token(
@@ -43,6 +45,7 @@ pub fn add_semantic_token(
                 delta_start,
                 length: 2000,
                 token_type,
+                token_modifiers_bitset: ctx.modifiers,
                 ..Default::default()
             });
         }
@@ -60,6 +63,7 @@ pub fn add_semantic_token(
                 delta_start: 0,
                 length: 2000,
                 token_type,
+                token_modifiers_bitset: ctx.modifiers,
                 ..Default::default()
             });
         }
@@ -70,7 +74,8 @@ pub fn add_semantic_token(
             delta_start: 0,
             length: end_col,
             token_type,
-            ..Default::default()
+            token_modifiers_bitset: ctx.modifiers,
+                ..Default::default()
         });
 
         ctx.last_line = start_row;
@@ -95,7 +100,8 @@ pub fn add_semantic_token(
             delta_start,
             length: (node.end_position().column - node.start_position().column) as u32,
             token_type,
-            ..Default::default()
+            token_modifiers_bitset: ctx.modifiers,
+                ..Default::default()
         });
     }
 }
@@ -132,6 +138,7 @@ pub fn add_semantic_token_at(
                 delta_start,
                 length: 2000,
                 token_type,
+                token_modifiers_bitset: ctx.modifiers,
                 ..Default::default()
             });
         }
@@ -149,6 +156,7 @@ pub fn add_semantic_token_at(
                 delta_start: 0,
                 length: 2000,
                 token_type,
+                token_modifiers_bitset: ctx.modifiers,
                 ..Default::default()
             });
         }
@@ -159,7 +167,8 @@ pub fn add_semantic_token_at(
             delta_start: 0,
             length: end_col,
             token_type,
-            ..Default::default()
+            token_modifiers_bitset: ctx.modifiers,
+                ..Default::default()
         });
 
         ctx.last_line = start_row;
@@ -184,7 +193,8 @@ pub fn add_semantic_token_at(
             delta_start,
             length: (end.column - start.column) as u32,
             token_type,
-            ..Default::default()
+            token_modifiers_bitset: ctx.modifiers,
+                ..Default::default()
         });
     }
 }

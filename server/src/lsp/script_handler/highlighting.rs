@@ -23,6 +23,7 @@ impl Highlighter {
             text: src,
             consts: static_consts(tree, src),
             fields: object_vars(tree, src),
+            own_funcs: own_functions(tree, src),
             locals: RefCell::new(HashSet::new()),
             params: RefCell::new(HashSet::new()),
         };
@@ -143,11 +144,13 @@ impl Highlighter {
                             }
                         } else {
                             if let Some(name) = node.child_by_field_name("name") {
+                                ctx.modifiers = if is_engine_function(&name, src) { 1 } else { 0 };
                                 Self::add_token(
                                     ctx,
                                     ctx.token_types.method,
                                     &name,
                                 );
+                                ctx.modifiers = 0;
                             }
                         }
                     },
@@ -351,6 +354,8 @@ pub struct Source<'a> {
     consts: HashSet<String>,
     /// object locals and statics of the script
     fields: HashSet<String>,
+    /// functions defined in this script (a call to one of them isn't an engine call)
+    own_funcs: HashSet<String>,
     /// parameters and var-declared locals of the function being walked
     locals: RefCell<HashSet<String>>,
     params: RefCell<HashSet<String>>,
@@ -454,6 +459,31 @@ fn function_names(func: &Node, src: &str) -> (HashSet<String>, HashSet<String>) 
         stack.extend(n.named_children(&mut c));
     }
     (params, locals)
+}
+
+/// an engine function (not overridden by a function of this script): semantic modifier defaultLibrary
+fn is_engine_function(name: &Node, src: &Source) -> bool {
+    if src.text.is_empty() {
+        return false;
+    }
+    let n = &src.text[name.start_byte()..name.end_byte()];
+    crate::analysis::engine::ENGINE.functions.contains_key(n) && !src.own_funcs.contains(n)
+}
+
+/// names of the functions defined in the script
+fn own_functions(tree: &Tree, src: &str) -> HashSet<String> {
+    let mut out = HashSet::new();
+    if src.is_empty() {
+        return out;
+    }
+    let root = tree.root_node();
+    let mut c = root.walk();
+    for f in root.named_children(&mut c).filter(|n| matches!(n.kind(), "function_definition" | "old_function_definition")) {
+        if let Some(n) = f.child_by_field_name("name") {
+            out.insert(src[n.start_byte()..n.end_byte()].to_string());
+        }
+    }
+    out
 }
 
 /// names of the script's object locals and statics (not consts)
@@ -608,6 +638,19 @@ mod tests {
         assert_eq!(n(53), 2, "%d, %5s");
         assert_eq!(n(54), 1, "\\\"");
         assert_eq!(n(55), 2, "k: declaration + use");
+    }
+
+    #[test]
+    fn engine_functions_get_default_library() {
+        let mut parser = Parser::new();
+        parser.set_language(tree_sitter_c4script::language()).expect("Loading c4scrpt grammar");
+        let src = "#strict 3\nfunc Mine() { return 1; }\nfunc f() { Mine(); GetX(); }";
+        let tree = parser.parse(src, None).unwrap();
+        let lut = TokenTypes { method: 60, ..TokenTypes::default() };
+        let tokens = Highlighter::collect_tokens_with_source(&tree, lut, src);
+        let calls: Vec<u32> = tokens.iter().filter(|t| t.token_type == 60).map(|t| t.token_modifiers_bitset).collect();
+        // Mine (definition), f (definition), Mine() call, GetX() call
+        assert_eq!(calls, vec![0, 0, 0, 1]);
     }
 
     #[test]
