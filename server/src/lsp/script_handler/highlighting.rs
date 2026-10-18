@@ -43,6 +43,12 @@ impl Highlighter {
             let node = cursor.node();
             let mut traverse_children = true;
 
+            if !node.is_named() && matches!(node.kind(), "var" | "in")
+                && node.parent().map(|p| p.kind() == "for_statement").unwrap_or(false)
+            {
+                Self::add_token(ctx, ctx.token_types.keyword, &node);
+            }
+
             if node.is_named() {
                 match node.kind() {
                     "comment" => {
@@ -53,7 +59,7 @@ impl Highlighter {
                         );
                     },
 
-                    "var_definition" => {
+                    "var_definition" | "var_definition_inline" => {
                         if let Some(ref child) = node.child(0) {
                             Self::add_token(ctx, ctx.token_types.var_scope, child);
                         }
@@ -383,6 +389,19 @@ mod tests {
         let tokens = Highlighter::collect_tokens_with_source(&tree, lut, src);
         assert_eq!(tokens.iter().filter(|t| t.token_type == 20).count(), 3, "NO_OWNER, MyLimit (declaration + use)");
         assert_eq!(tokens.iter().filter(|t| t.token_type == 21).count(), 1, "this");
+    }
+
+    #[test]
+    fn colors_var_in_for_loops() {
+        let mut parser = Parser::new();
+        parser.set_language(tree_sitter_c4script::language()).expect("Loading c4scrpt grammar");
+        let src = "#strict 3\nfunc f(array a) { for (var i = 0; i < 3; i++) {} for (var x in a) {} }";
+        let tree = parser.parse(src, None).unwrap();
+        let lut = TokenTypes { keyword: 30, var_scope: 31, ..TokenTypes::default() };
+        let tokens = Highlighter::collect_tokens_with_source(&tree, lut, src);
+        // for (var i ...): var_scope; for (var x in a): var + in as keywords (besides func/for/for)
+        assert_eq!(tokens.iter().filter(|t| t.token_type == 31).count(), 1, "var in for (var i = 0; ...)");
+        assert_eq!(tokens.iter().filter(|t| t.token_type == 30).count(), 5, "func, for, for, var, in");
     }
 
     #[test]
