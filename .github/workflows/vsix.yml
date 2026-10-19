@@ -37,6 +37,9 @@ jobs:
       - name: Build language server and c4check
         working-directory: server
         run: cargo build --release --bin lsp --bin c4check
+      - name: Unit tests
+        working-directory: server
+        run: cargo test --release
       - name: Check binary architecture
         if: runner.os != 'Windows'
         run: file server/target/release/lsp
