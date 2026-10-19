@@ -99,6 +99,51 @@ fn main() {
             println!("{}:{}:{}: {} [{}] {}", f.path.display(), d.range.start.line + 1, d.range.start.character + 1, label, code, d.message);
         }
     }
+    // DefCore.txt / ActMap.txt / Scenario.txt below the paths given (or the roots): ini::check
+    if lint_files() {
+        let mut ini_files: Vec<PathBuf> = vec![];
+        let starts: Vec<PathBuf> = if targets.is_empty() { index.roots.clone() } else { targets.iter().map(PathBuf::from).collect() };
+        fn walk(d: &std::path::Path, out: &mut Vec<PathBuf>) {
+            for e in std::fs::read_dir(d).into_iter().flatten().flatten() {
+                let p = e.path();
+                let n = e.file_name().to_string_lossy().to_string();
+                if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                    if ![".git", "target", "node_modules", ".claude"].contains(&n.as_str()) {
+                        walk(&p, out);
+                    }
+                } else if ["DefCore.txt", "ActMap.txt", "Scenario.txt"].iter().any(|x| x.eq_ignore_ascii_case(&n)) {
+                    out.push(p);
+                }
+            }
+        }
+        for s in &starts {
+            let s = std::path::Path::new(s);
+            if s.is_dir() { walk(s, &mut ini_files) } else if s.is_file() { ini_files.push(s.to_path_buf()) }
+        }
+        ini_files.sort();
+        ini_files.dedup();
+        for p in ini_files {
+            let name = p.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+            let kind = match name.as_str() {
+                "defcore.txt" => legacy_clonk_ls::analysis::ini::IniFile::DefCore,
+                "actmap.txt" => legacy_clonk_ls::analysis::ini::IniFile::ActMap,
+                _ => legacy_clonk_ls::analysis::ini::IniFile::Scenario,
+            };
+            let text = decode_bytes(&std::fs::read(&p).unwrap_or_default());
+            let ctx = legacy_clonk_ls::analysis::ini::Ctx { index: &index, path: &p, game_dir: game_dir.as_deref() };
+            for d in legacy_clonk_ls::analysis::ini::check(kind, &text, &ctx) {
+                let sev = d.severity.unwrap_or(DiagnosticSeverity::ERROR);
+                let label = match sev {
+                    DiagnosticSeverity::ERROR => { n_err += 1; "error" }
+                    DiagnosticSeverity::WARNING => { n_warn += 1; "warning" }
+                    _ => { n_info += 1; "info" }
+                };
+                if errors_only && sev != DiagnosticSeverity::ERROR { continue; }
+                let code = match &d.code { Some(tower_lsp::lsp_types::NumberOrString::String(s)) => s.clone(), _ => String::new() };
+                println!("{}:{}:{}: {} [{}] {}", p.display(), d.range.start.line + 1, d.range.start.character + 1, label, code, d.message);
+            }
+        }
+    }
     // the engine's script errors from Clonk.log files (analysis/runlog.rs), after the static ones
     for log in &runtime_logs {
         let text = decode_bytes(&std::fs::read(log).unwrap_or_default());
@@ -123,6 +168,11 @@ fn main() {
     eprintln!("checked {} files ({} indexed, {} ids): {} errors, {} warnings, {} infos",
         files.len(), index.files.len(), index.ids.len(), n_err, n_warn, n_info);
     if n_err > 0 { std::process::exit(1); }
+}
+
+/// DefCore/ActMap/Scenario.txt checks run with lint on (they are lint-like: the engine is silent about them).
+fn lint_files() -> bool {
+    legacy_clonk_ls::analysis::diagnostics::lint_enabled()
 }
 
 /// Canonical absolute path without the Windows verbatim prefix (\\?\) that canonicalize() adds.

@@ -358,6 +358,255 @@ pub fn hover(file: IniFile, src: &str, pos: Position, ctx: &Ctx) -> Option<Strin
     None
 }
 
+/// Width and height of a PNG or BMP image (from its header).
+pub fn image_size(path: &Path) -> Option<(u32, u32)> {
+    let mut f = std::fs::File::open(path).ok()?;
+    let mut h = [0u8; 26];
+    std::io::Read::read_exact(&mut f, &mut h).ok()?;
+    if &h[1..4] == b"PNG" {
+        let w = u32::from_be_bytes([h[16], h[17], h[18], h[19]]);
+        let hh = u32::from_be_bytes([h[20], h[21], h[22], h[23]]);
+        return Some((w, hh));
+    }
+    if &h[0..2] == b"BM" {
+        let w = i32::from_le_bytes([h[18], h[19], h[20], h[21]]).unsigned_abs();
+        let hh = i32::from_le_bytes([h[22], h[23], h[24], h[25]]).unsigned_abs();
+        return Some((w, hh));
+    }
+    None
+}
+
+/// The definition's base graphics (Graphics.png, else Graphics.bmp: C4DefGraphics::LoadGraphics).
+fn graphics_file(dir: &Path) -> Option<std::path::PathBuf> {
+    ["Graphics.png", "Graphics.bmp"].iter().map(|n| dir.join(n)).find(|p| p.is_file())
+}
+
+/// Problems of a DefCore.txt / ActMap.txt / Scenario.txt the engine passes over silently (or with a load error):
+/// unknown sections/keys (StdCompilerINIRead matches names case-sensitively and ignores the rest), values of the
+/// wrong kind (flags, IDs, numbers, 0/1, procedures, actions, functions), a definition without Graphics.png/.bmp
+/// (the engine doesn't load it), Picture/Facet rectangles outside the image, an id= used by another definition.
+pub fn check(file: IniFile, src: &str, ctx: &Ctx) -> Vec<tower_lsp::lsp_types::Diagnostic> {
+    use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Range};
+    let mut out: Vec<Diagnostic> = vec![];
+    let lines: Vec<&str> = src.lines().collect();
+    let mut push = |row: usize, start: usize, end: usize, sev: DiagnosticSeverity, code: &str, msg: String| {
+        let line = lines.get(row).copied().unwrap_or("");
+        let (a, b) = (line[..start.min(line.len())].encode_utf16().count() as u32, line[..end.min(line.len())].encode_utf16().count() as u32);
+        out.push(Diagnostic {
+            range: Range::new(Position::new(row as u32, a), Position::new(row as u32, b.max(a + 1))),
+            severity: Some(sev),
+            code: Some(NumberOrString::String(code.to_string())),
+            source: Some("c4script".to_string()),
+            message: msg,
+            ..Default::default()
+        });
+    };
+    let dir = ctx.path.parent().unwrap_or(Path::new("."));
+    let sections = file.sections();
+    let is_section = |n: &str| sections.contains(&n) || (file == IniFile::Scenario && n.starts_with("Player") && n[6..].parse::<u32>().map(|i| (1..=4).contains(&i)).unwrap_or(false));
+    // actions of this ActMap (NextAction etc.) and the definition's script (StartCall etc.)
+    let actmap_names: Vec<String> = if file == IniFile::ActMap {
+        lines.iter().filter_map(|l| l.trim().strip_prefix("Name=").map(|n| n.trim().to_string())).collect()
+    } else {
+        super::assets::actions(dir).unwrap_or_default()
+    };
+    let script = ctx.index.files.get(&path_key(&dir.join("Script.c")));
+    let has_func = |f: &str| match script {
+        Some(info) => !ctx.index.visible_funcs(info, f).is_empty(),
+        None => true, // no indexed script: can't tell
+    };
+    let known_id = |id: &str| id == "NONE" || ctx.index.id_for(id, ctx.path).is_some() || ctx.index.id_any(id).is_some() || super::diagnostics::standard_id(id).is_some();
+    // the image in DefCore units: C4Facet::DrawX multiplies source rectangles by Scale (percent, [DefCore] Scale=);
+    // a tiny placeholder (graphics set at runtime from another definition) isn't checked
+    let scale: f64 = std::fs::read(dir.join("DefCore.txt")).ok().map(|b| super::text::decode_bytes(&b)).and_then(|t| {
+        let mut sec = "";
+        for l in t.lines() {
+            let l = l.trim();
+            if l.starts_with('[') { sec = l; continue; }
+            if sec == "[DefCore]" {
+                if let Some(v) = l.strip_prefix("Scale=") { return v.trim().parse::<f64>().ok(); }
+            }
+        }
+        None
+    }).unwrap_or(100.0) / 100.0;
+    // a script that swaps graphics at runtime (SetGraphics, often from another definition) isn't judged by its sheet
+    let swaps = std::fs::read(dir.join("Script.c")).map(|b| String::from_utf8_lossy(&b).contains("SetGraphics(")).unwrap_or(false);
+    let image = graphics_file(dir).and_then(|g| image_size(&g)).filter(|(w, h)| !swaps && *w > 8 && *h > 8)
+        .map(|(w, h)| (((w as f64) / scale).round() as u32, ((h as f64) / scale).round() as u32));
+    let is_int = |v: &str| { let v = v.trim(); !v.is_empty() && (v.parse::<i64>().is_ok() || v.strip_prefix("0x").map(|h| i64::from_str_radix(h, 16).is_ok()).unwrap_or(false)) };
+    let ints = |v: &str| -> Option<Vec<i64>> { v.trim_end_matches(';').split(',').map(|x| x.trim().parse::<i64>().ok()).collect() };
+    let mut section = String::new();
+    // per [Action]: name row, facet, length, directions, facet base
+    struct Act { row: usize, name: Option<String>, facet: Option<(usize, Vec<i64>)>, length: i64, dirs: i64, flip: i64, base: bool }
+    let mut acts: Vec<Act> = vec![];
+    let mut defcore_id: Option<(usize, usize, String)> = None;
+    let mut size: (Option<i64>, Option<i64>) = (None, None);
+    let mut picture: Option<(usize, Vec<i64>)> = None;
+    for (row, raw) in lines.iter().enumerate() {
+        let t = raw.trim();
+        if t.is_empty() || t.starts_with(';') || t.starts_with('#') || t.starts_with("//") {
+            continue;
+        }
+        let indent = raw.len() - raw.trim_start().len();
+        if let Some(name) = t.strip_prefix('[').and_then(|x| x.strip_suffix(']')) {
+            section = name.to_string();
+            if !is_section(name) {
+                push(row, indent, indent + t.len(), DiagnosticSeverity::WARNING, "ini-section",
+                    format!("unknown section [{}] (the engine ignores it; sections: {})", name, sections.join(", ")));
+            }
+            if file == IniFile::ActMap && name == "Action" {
+                acts.push(Act { row, name: None, facet: None, length: 1, dirs: 1, flip: 0, base: false });
+            }
+            continue;
+        }
+        let Some((k, v)) = t.split_once('=') else { continue };
+        let (key, value) = (k.trim(), v.trim());
+        if !is_section(&section) {
+            continue;
+        }
+        let sec_keys = file.keys(if section.starts_with("Player") { "Player1" } else { &section });
+        let Some(spec) = sec_keys.iter().find(|x| x.key == key) else {
+            let hint = sec_keys.iter().find(|x| x.key.eq_ignore_ascii_case(key)).map(|x| format!(" (names are case-sensitive: {})", x.key)).unwrap_or_default();
+            push(row, indent, indent + key.len(), DiagnosticSeverity::WARNING, "ini-key",
+                format!("unknown key {} in [{}]: the engine ignores it{}", key, section, hint));
+            continue;
+        };
+        let vstart = indent + t.find('=').unwrap_or(0) + 1;
+        let vstart = vstart + (raw.len() - vstart).saturating_sub(raw[vstart.min(raw.len())..].trim_start().len());
+        let vend = vstart + value.len();
+        // unknown IDs in a Scenario.txt usually come from packs that aren't indexed: only a hint there
+        let id_sev = if file == IniFile::Scenario { DiagnosticSeverity::INFORMATION } else { DiagnosticSeverity::WARNING };
+        let none = value.eq_ignore_ascii_case("none");
+        let mut bad = |id: bool, msg: String| push(row, vstart, vend, if id { id_sev } else { DiagnosticSeverity::WARNING }, "ini-value", msg);
+        match spec.kind.as_str() {
+            "flags" if !value.is_empty() => {
+                for f in value.split('|').map(|x| x.trim()) {
+                    if !f.is_empty() && !is_int(f) && !spec.values.iter().any(|x| x == f) {
+                        bad(false, format!("{}: unknown flag {} (the engine reads it as 0)", key, f));
+                    }
+                }
+            }
+            "id" if !value.is_empty() && !known_id(value) => bad(true, format!("{}: unknown definition ID {}", key, value)),
+            "idlist" if !value.is_empty() => {
+                for entry in value.split(';').map(|x| x.trim()).filter(|x| !x.is_empty()) {
+                    let (id, count) = entry.split_once('=').map(|(a, b)| (a.trim(), Some(b.trim()))).unwrap_or((entry, None));
+                    if !known_id(id) {
+                        bad(true, format!("{}: unknown definition ID {}", key, id));
+                    } else if count.map(|c| !is_int(c)).unwrap_or(false) {
+                        bad(false, format!("{}: the count of {} isn't a number", key, id));
+                    }
+                }
+            }
+            "int" if !is_int(value) && !value.is_empty() && ints(value).is_none() => bad(false, format!("{}: {} isn't a number", key, value)),
+            "ints" | "sval" if !value.is_empty() && ints(value).is_none() => bad(false, format!("{}: expected numbers separated by commas", key)),
+            "bool" if !matches!(value, "0" | "1" | "") => bad(false, format!("{}: expected 0 or 1", key)),
+            "procedure" if !value.is_empty() && !none && !spec.values.iter().any(|x| x == value) => bad(false, format!("{}: unknown procedure {} (the engine treats it as NONE)", key, value)),
+            "action" if !value.is_empty() && !none && !matches!(value, "Hold" | "Idle") && !actmap_names.iter().any(|a| a == value) =>
+                bad(false, format!("{}: no action {} in this ActMap (only Hold and Idle besides)", key, value)),
+            "function" if !value.is_empty() && !none && !has_func(value) => bad(false, format!("{}: the definition's script has no function {} (the engine calls nothing)", key, value)),
+            _ => {}
+        }
+        // remembered for the cross checks below
+        match (file, section.as_str(), key) {
+            (IniFile::DefCore, "DefCore", "id") => defcore_id = Some((row, vstart, value.to_string())),
+            (IniFile::DefCore, "DefCore", "Width") => size.0 = value.parse().ok(),
+            (IniFile::DefCore, "DefCore", "Height") => size.1 = value.parse().ok(),
+            (IniFile::DefCore, "DefCore", "Picture") => picture = ints(value).map(|v| (row, v)),
+            (IniFile::ActMap, "Action", _) => {
+                if let Some(a) = acts.last_mut() {
+                    match key {
+                        "Name" => a.name = Some(value.to_string()),
+                        "Facet" => a.facet = ints(value).map(|v| (row, v)),
+                        "Length" => a.length = value.parse().unwrap_or(1).max(1),
+                        "Directions" => a.dirs = value.parse().unwrap_or(1).max(1),
+                        "FacetBase" => a.base = value == "1",
+                        "FlipDir" => a.flip = value.parse().unwrap_or(0),
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    // DefCore: graphics, picture, size, id collisions
+    if file == IniFile::DefCore {
+        if graphics_file(dir).is_none() {
+            push(0, 0, lines.first().map(|l| l.len()).unwrap_or(1), DiagnosticSeverity::ERROR, "def-graphics",
+                "no Graphics.png or Graphics.bmp in this definition: the engine doesn't load it (\"Error loading graphics\")".to_string());
+        }
+        if let Some((w, h)) = image {
+            if let (Some(sw), Some(sh)) = size {
+                if acts.is_empty() && super::assets::actions(dir).is_none() && (sw > w as i64 || sh > h as i64) {
+                    if let Some(r) = lines.iter().position(|l| l.trim_start().starts_with("Width=")) {
+                        push(r, 0, lines[r].len(), DiagnosticSeverity::WARNING, "ini-value",
+                            format!("Width/Height {}x{} is bigger than the graphics ({}x{}): the sprite is cut", sw, sh, w, h));
+                    }
+                }
+            }
+            if let Some((row, p)) = &picture {
+                if p.len() >= 4 && (p[0] + p[2] > w as i64 || p[1] + p[3] > h as i64 || p[0] < 0 || p[1] < 0) {
+                    push(*row, 0, lines[*row].len(), DiagnosticSeverity::WARNING, "ini-value",
+                        format!("Picture {},{},{},{} lies outside the graphics ({}x{})", p[0], p[1], p[2], p[3], w, h));
+                }
+            }
+        }
+        if let Some((row, col, id)) = &defcore_id {
+            // what loads together: a scenario's own definitions (up to its .c4s), else the outermost pack/folder
+            let outer = |p: &Path| -> String {
+                let k = path_key(p);
+                if let Some(i) = k.find(".c4s/") {
+                    return k[..i + 5].to_string();
+                }
+                let mut acc = String::new();
+                for seg in k.split('/') {
+                    acc.push_str(seg);
+                    acc.push('/');
+                    if seg.ends_with(".c4d") || seg.ends_with(".c4f") {
+                        return acc;
+                    }
+                }
+                acc
+            };
+            let mine = outer(ctx.path);
+            let others: Vec<std::path::PathBuf> = ctx.index.ids.get(id.as_str()).into_iter().flatten()
+                .map(|i| i.defcore.clone())
+                .filter(|p| path_key(p) != path_key(ctx.path) && outer(p) == mine)
+                // an identical copy (reference/ next to content/) isn't a second definition
+                .filter(|p| std::fs::read(p).ok() != Some(src.as_bytes().to_vec()) && std::fs::read(p).ok() != std::fs::read(ctx.path).ok())
+                .collect();
+            if let Some(o) = others.first() {
+                push(*row, *col, *col + id.len(), DiagnosticSeverity::WARNING, "ini-id",
+                    format!("id {} is also used by {}{} (where both load, the more local one replaces the other)",
+                        id, o.parent().unwrap_or(o).display(), if others.len() > 1 { format!(" and {} more", others.len() - 1) } else { String::new() }));
+            }
+        }
+    }
+    // ActMap: duplicate names, facets inside the graphics
+    if file == IniFile::ActMap {
+        let mut seen: HashSet<String> = HashSet::new();
+        for a in &acts {
+            if let Some(n) = &a.name {
+                if !seen.insert(n.clone()) {
+                    push(a.row, 0, 8, DiagnosticSeverity::WARNING, "ini-value", format!("a second action {}: SetAction finds the first one", n));
+                }
+            }
+            if let (Some((row, f)), Some((w, h)), false) = (&a.facet, image, a.base) {
+                if f.len() >= 4 && f[2] > 0 && f[3] > 0 {
+                    // directions from FlipDir on are drawn mirrored from the lower rows (C4Object::UpdateFlipDir)
+                    let rows = if a.flip > 0 { a.flip.min(a.dirs) } else { a.dirs };
+                    let (right, bottom) = (f[0] + f[2] * a.length, f[1] + f[3] * rows);
+                    if right > w as i64 || bottom > h as i64 || f[0] < 0 || f[1] < 0 {
+                        push(*row, 0, lines[*row].len(), DiagnosticSeverity::WARNING, "ini-value",
+                            format!("action {}: {} frames x {} directions of {}x{} from {},{} reach {},{} outside the graphics ({}x{})",
+                                a.name.as_deref().unwrap_or("?"), a.length, a.dirs, f[2], f[3], f[0], f[1], right, bottom, w, h));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -322,6 +322,12 @@ impl Backend {
 
     /// Re-index an open script and compute its diagnostics.
     fn analyze(&self, uri: &Url) -> Option<Vec<Diagnostic>> {
+        // DefCore.txt / ActMap.txt / Scenario.txt (ini::check)
+        if legacy_clonk_ls::analysis::diagnostics::lint_enabled() {
+            if let Some(d) = self.with_ini(uri, |file, doc, ctx| legacy_clonk_ls::analysis::ini::check(file, &doc.source, ctx)) {
+                return Some(d);
+            }
+        }
         let doc = self.documents.get(uri)?;
         if !matches!(doc.doc_type, DocType::Script) {
             return None;
