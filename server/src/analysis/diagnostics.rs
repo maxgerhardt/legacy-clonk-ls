@@ -242,6 +242,11 @@ impl<'a> Ctx<'a> {
             if nil_checks_enabled() {
                 self.check_nil_receiver(n, name);
             }
+            // obj->ID::F(): exactly ID's script function F (C4AulParse ATT_DCOLON)
+            if let Some(idn) = n.child_by_field_name("id") {
+                self.check_namespace_call(n, &idn, name, range);
+                return;
+            }
             let failsafe = n.parent().map(|p| super::index::children(&p).iter().any(|c| c.kind() == "~")).unwrap_or(false);
             // the receiver's definitions are known (obj = CreateObject(FLNT, ...)): the call reaches exactly their
             // functions (+ global ones); none and no engine function = "Object call: No function" at runtime
@@ -450,6 +455,40 @@ impl<'a> Ctx<'a> {
                     name, i + 1, got, ty, pname, hint)));
             break; // the engine stops at the first parameter it can't convert
         }
+    }
+
+    /// `obj->ID::F()`: the engine resolves it at compile time (C4AulParse ATT_DCOLON): the definition must be
+    /// loaded ("direct object call: def not found: ID") and F must be a script function of it, its #include'd or
+    /// #appendto scripts (pDef->Script.GetSFunc: engine and global functions don't count, "direct object call:
+    /// function ID::F not found"). The access check there never fails (C4AulScript::GetAllowedAccess).
+    fn check_namespace_call(&mut self, n: &Node, idn: &Node, name: &str, range: tower_lsp::lsp_types::Range) {
+        let id = node_text(idn, self.src);
+        // ->~ID::F(): the engine expects a function name right after ->~ (oracle TS72)
+        if n.parent().map(|p| super::index::children(&p).iter().any(|c| c.kind() == "~")).unwrap_or(false) {
+            self.out.push(diag(self.li.node_range(idn), DiagnosticSeverity::ERROR, "syntax",
+                "expecting func name after '->' (->~ can't be combined with ID::)".to_string()));
+            return;
+        }
+        let complete = self.index.scope_packs_indexed(&self.info.path);
+        let sev = if complete { DiagnosticSeverity::ERROR } else { DiagnosticSeverity::INFORMATION };
+        if self.info.def_id.as_deref() != Some(id) && self.index.id_for(id, &self.info.path).is_none() {
+            self.out.push(diag(self.li.node_range(idn), sev, "direct-call", format!("direct object call: def not found: {}", id)));
+            return;
+        }
+        let scripts = super::objids::def_scripts(self.index, self.info, id);
+        // a script we can't see completely (an #include/#appendto target that isn't indexed): don't judge
+        if scripts.iter().any(|(_, f)| self.index.has_unresolved_targets(f)) {
+            return;
+        }
+        // the function that runs: the best-ranked one (appendto > own > included)
+        let def = scripts.iter().filter_map(|(r, f)| f.funcs.iter().find(|d| d.name == name).map(|d| (*r, d))).min_by_key(|(r, _)| *r).map(|(_, d)| d);
+        let Some(def) = def else {
+            self.out.push(diag(range, sev, "direct-call",
+                format!("direct object call: function {}::{} not found (only {}'s script functions count, not engine or global ones)", id, name, id)));
+            return;
+        };
+        let params: Vec<(String, String)> = def.params.iter().map(|(t, n)| (t.clone().unwrap_or_default(), n.clone())).collect();
+        self.check_arg_types(n, name, &params, false, false);
     }
 
     /// nil-call: `x->F()` (also `->~`: AB_CALLFS stops on nil too) where x may be nil at this point (types.rs, after

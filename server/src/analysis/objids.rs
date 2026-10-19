@@ -619,6 +619,11 @@ pub fn receiver_ids(index: &Index, info: &FileInfo, src: &str, call: &Node) -> O
         return None;
     }
     let arrow = call.parent().filter(|p| p.kind() == "arrow_expression")?;
+    // obj->ID::F(): exactly ID's function, whatever obj is
+    if let Some(idn) = call.child_by_field_name("id") {
+        let id = node_text(&idn, src).to_string();
+        return resolvable(index, info, std::iter::once(id).collect());
+    }
     let target = named_children(&arrow).into_iter().find(|c| c.kind() != "comment")?;
     if target.id() == call.id() {
         return None;
