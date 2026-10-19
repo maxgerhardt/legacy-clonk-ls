@@ -286,6 +286,13 @@
 				"id": "translation",
 				"superType": "macro"
 			}
+		],
+		"grammars": [
+			{
+				"language": "c4script",
+				"scopeName": "source.c4script",
+				"path": "./syntaxes/c4script.tmLanguage.json"
+			}
 		]
 	},
 	"scripts": {

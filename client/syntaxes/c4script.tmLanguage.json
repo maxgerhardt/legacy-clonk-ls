@@ -1,0 +1,37 @@
+{
+	"$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+	"name": "C4Script",
+	"scopeName": "source.c4script",
+	"comment": "Only comments and strings: VS Code needs them to skip brackets inside for bracket matching and pair colors, and to not auto-close inside them. All other colors come from the language server's semantic tokens.",
+	"patterns": [
+		{ "include": "#comment-block" },
+		{ "include": "#comment-line" },
+		{ "include": "#string" }
+	],
+	"repository": {
+		"comment-block": {
+			"comment": "an unterminated block comment runs to the end of the file, like in the engine",
+			"name": "comment.block.c4script",
+			"begin": "/\\*",
+			"end": "\\*/",
+			"captures": { "0": { "name": "punctuation.definition.comment.c4script" } }
+		},
+		"comment-line": {
+			"name": "comment.line.double-slash.c4script",
+			"begin": "//",
+			"end": "$",
+			"beginCaptures": { "0": { "name": "punctuation.definition.comment.c4script" } }
+		},
+		"string": {
+			"comment": "strings end at the line end when unterminated; the engine knows only the escapes \\\" and \\\\",
+			"name": "string.quoted.double.c4script",
+			"begin": "\"",
+			"end": "\"|$",
+			"beginCaptures": { "0": { "name": "punctuation.definition.string.begin.c4script" } },
+			"endCaptures": { "0": { "name": "punctuation.definition.string.end.c4script" } },
+			"patterns": [
+				{ "name": "constant.character.escape.c4script", "match": "\\\\[\"\\\\]" }
+			]
+		}
+	}
+}
