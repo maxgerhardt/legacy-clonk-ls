@@ -132,7 +132,22 @@ type State = HashMap<String, Ty>;
 fn merge(a: Option<State>, b: Option<State>) -> Option<State> {
     match (a, b) {
         (None, x) | (x, None) => x,
-        (Some(mut a), Some(b)) => {
+        (Some(mut a), Some(mut b)) => {
+            // map keys present on one path only
+            let only = |x: &State, y: &State| -> Vec<(String, Option<Ty>)> {
+                x.iter().filter(|(k, _)| k.starts_with(MAP_KEY) && !y.contains_key(*k)).map(|(k, v)| {
+                    let complete = map_key_var(k).map(|var| y.contains_key(&map_all(var))).unwrap_or(false);
+                    (k.clone(), complete.then_some(*v | NIL))
+                }).collect()
+            };
+            for (k, v) in only(&a, &b) {
+                match v { Some(t) => { a.insert(k.clone(), t); b.insert(k, t); } None => { a.remove(&k); } }
+            }
+            for (k, v) in only(&b, &a) {
+                match v { Some(t) => { a.insert(k.clone(), t); b.insert(k, t); } None => { b.remove(&k); } }
+            }
+            a.retain(|k, _| !k.starts_with(MAP_ALL) || b.contains_key(k));
+            b.retain(|k, _| !k.starts_with(MAP_ALL) || a.contains_key(k));
             // a call fact ("Contained() isn't nil") holds after the join only if it holds on both paths
             a.retain(|k, _| !(k.starts_with(CALL_FACT) || k.starts_with(ARR_LEN)) || b.contains_key(k));
             for (k, v) in b {
@@ -171,6 +186,34 @@ const ARR_LEN: &str = "\u{1}n:";
 
 fn len_key(name: &str) -> String {
     format!("{}{}", ARR_LEN, name)
+}
+
+/// State key of a function variable's map key: the type stored under it ("s:name" for `name`/"name", "id:CLNK",
+/// "i:2"). MAP_ALL marks a map whose keys are all known (a literal with constant keys, then constant-key writes):
+/// any other key reads nil there. Maps are copy-on-write (C4ValueStandardRefCountedContainer::IncElementRef), so
+/// passing one to a function can't change it; other assignments, `&` parameters and writes with a non-constant
+/// key forget the keys.
+const MAP_KEY: &str = "\u{1}k:";
+const MAP_ALL: &str = "\u{1}K:";
+
+fn map_key(var: &str, key: &str) -> String {
+    format!("{}{}\u{1}{}", MAP_KEY, var, key)
+}
+
+fn map_all(var: &str) -> String {
+    format!("{}{}", MAP_ALL, var)
+}
+
+/// The variable a MAP_KEY state key belongs to.
+fn map_key_var(k: &str) -> Option<&str> {
+    k.strip_prefix(MAP_KEY)?.split('\u{1}').next()
+}
+
+/// Drop everything known about the keys of map variable `var`.
+fn forget_map(st: &mut State, var: &str) {
+    let prefix = format!("{}{}\u{1}", MAP_KEY, var);
+    st.retain(|k, _| !k.starts_with(&prefix));
+    st.remove(&map_all(var));
 }
 
 /// State key prefix of a call fact: the type a call like `Contained()` / `GetCrew(iPlr)` has after a guard
@@ -425,6 +468,9 @@ impl<'a> Infer<'a> {
     fn put(&self, st: &mut State, name: &str, t: Ty) {
         st.insert(name.to_string(), t);
         st.remove(&len_key(name));
+        if st.keys().any(|k| k.starts_with(MAP_KEY) || k.starts_with(MAP_ALL)) {
+            forget_map(st, name);
+        }
         // a call fact about GetCrew(iPlr) ends when iPlr changes
         if st.keys().any(|k| k.starts_with(CALL_FACT)) {
             let is_arg = |k: &str| k.split(|c| c == '(' || c == ',' || c == ')').skip(1).any(|a| a == name);
@@ -476,6 +522,9 @@ impl<'a> Infer<'a> {
                             self.put(st, self.text(id), t);
                             if let Some(len) = nc.get(1).and_then(|v| self.literal_len(v)) {
                                 st.insert(len_key(self.text(id)), len);
+                            }
+                            if let Some(entries) = nc.get(1).and_then(|v| self.map_literal(v)) {
+                                self.set_map(st, self.text(id), entries);
                             }
                         }
                         self.out.at.insert(id.id(), t);
@@ -552,13 +601,32 @@ impl<'a> Infer<'a> {
             let vars: Vec<Node> = all.iter().take(in_pos).filter(|c| c.kind() == "identifier").copied().collect();
             // one variable: the array's elements (C4AulExec AB_FOREACH_NEXT); two: key and value of a map
             let elem = if vars.len() == 1 && kinds(tc) & !NIL == ARRAY { elements(tc) } else { ANY };
-            for v in &vars {
-                if let Some(st) = s.as_mut() {
-                    if self.locals.contains(self.text(v)) {
-                        self.put(st, self.text(v), elem);
+            // two variables over a map with all keys known: the keys' kinds and the union of the values
+            let coll = all.iter().skip(in_pos + 1).find(|c| c.is_named()).copied();
+            let mut kv: Option<(Ty, Ty)> = None;
+            if let (2, Some(c), Some(st)) = (vars.len(), coll.filter(|c| c.kind() == "identifier"), s.as_ref()) {
+                let var = self.text(&c);
+                if st.contains_key(&map_all(var)) {
+                    let prefix = format!("{}{}\u{1}", MAP_KEY, var);
+                    let (mut kt, mut vt) = (NONE, NONE);
+                    for (k, v) in st.iter().filter(|(k, _)| k.starts_with(&prefix)) {
+                        let key = &k[prefix.len()..];
+                        kt |= if key.starts_with("s:") { STRING } else if key.starts_with("id:") { ID } else { INT };
+                        vt |= *v;
+                    }
+                    if kt != NONE {
+                        kv = Some((kt, vt));
                     }
                 }
-                self.out.at.insert(v.id(), elem);
+            }
+            for (i, v) in vars.iter().enumerate() {
+                let t = match kv { Some((kt, vt)) => if i == 0 { kt } else { vt }, None => elem };
+                if let Some(st) = s.as_mut() {
+                    if self.locals.contains(self.text(v)) {
+                        self.put(st, self.text(v), t);
+                    }
+                }
+                self.out.at.insert(v.id(), t);
             }
             let _ = named;
             return self.run_loop(None, body, None, s);
@@ -667,6 +735,60 @@ impl<'a> Infer<'a> {
             },
             _ => None,
         }
+    }
+
+    /// Record the type of an expression node (what `expr` does at its end) and return it.
+    fn note(&mut self, n: Node, t: Ty) -> Ty {
+        self.out.at.insert(n.id(), t);
+        t
+    }
+
+    /// A constant map key: an identifier/string key of a literal or `m.key` -> "s:name", `[CLNK]` -> "id:CLNK",
+    /// `[2]` -> "i:2"; None for anything computed.
+    fn const_key(&self, n: &Node, name_ok: bool) -> Option<String> {
+        let t = self.text(n);
+        match n.kind() {
+            "identifier" if name_ok => Some(format!("s:{}", t)),
+            "string" if !t.contains('\\') && t.len() >= 2 => Some(format!("s:{}", &t[1..t.len() - 1])),
+            "id" if t.chars().all(|c| c.is_ascii_digit()) => t.parse::<i64>().ok().map(|v| format!("i:{}", v)),
+            "id" => Some(format!("id:{}", t)),
+            "number" => self.const_index(n).map(|v| format!("i:{}", v)),
+            _ => None,
+        }
+    }
+
+    /// The constant key of a map access (`m.key`, `m["key"]`, `m[CLNK]`).
+    fn access_key(&self, n: &Node) -> Option<String> {
+        let dot = children(n).iter().any(|c| c.kind() == ".");
+        let key = named_children(n).into_iter().filter(|c| c.kind() != "comment").nth(1)?;
+        self.const_key(&key, dot)
+    }
+
+    /// (key, value type) of a map literal whose keys are all constant (a computed key could be any of them).
+    fn map_literal(&self, n: &Node) -> Option<Vec<(String, Ty)>> {
+        if n.kind() != "map" {
+            return None;
+        }
+        let mut out = vec![];
+        for e in named_children(n).into_iter().filter(|c| c.kind() == "map_entry") {
+            let parts: Vec<Node> = named_children(&e).into_iter().filter(|c| c.kind() != "comment").collect();
+            let (Some(k), Some(v)) = (parts.first(), parts.last()) else { return None };
+            let kc = named_children(k).into_iter().find(|c| c.kind() != "comment")?;
+            // `name = v` is the key "name"; `[name] = v` is the variable's value
+            let bracket = children(k).iter().any(|c| c.kind() == "[");
+            let key = self.const_key(&kc, kc.kind() == "identifier" && !bracket)?;
+            out.push((key, self.out.at.get(&v.id()).copied().unwrap_or(ANY)));
+        }
+        Some(out)
+    }
+
+    /// Remember a map variable's keys (later entries of a literal win, like in the engine).
+    fn set_map(&self, st: &mut State, var: &str, entries: Vec<(String, Ty)>) {
+        forget_map(st, var);
+        for (k, t) in entries {
+            st.insert(map_key(var, &k), t);
+        }
+        st.insert(map_all(var), 1);
     }
 
     /// The number of elements of an array literal.
@@ -786,8 +908,15 @@ impl<'a> Infer<'a> {
             }
             "map" => {
                 for e in named_children(&n).into_iter().filter(|c| c.kind() == "map_entry") {
-                    if let Some(v) = named_children(&e).into_iter().last() {
-                        self.expr(v, s);
+                    let parts: Vec<Node> = named_children(&e).into_iter().filter(|c| c.kind() != "comment").collect();
+                    // [expr] = v: the key is evaluated too
+                    if let Some(k) = parts.first().filter(|k| k.kind() == "map_key") {
+                        for kc in named_children(k).into_iter().filter(|c| !matches!(c.kind(), "identifier" | "string" | "comment")) {
+                            self.expr(kc, s);
+                        }
+                    }
+                    if let Some(v) = parts.last() {
+                        self.expr(*v, s);
                     }
                 }
                 MAP
@@ -814,6 +943,18 @@ impl<'a> Infer<'a> {
                 if !dot {
                     if let Some(i) = nc.get(1) {
                         self.expr(*i, s);
+                    }
+                }
+                // m.key / m["key"] / m[CLNK] of a map variable with known keys
+                if let Some(b) = nc.first().filter(|b| b.kind() == "identifier" && self.locals.contains(self.text(b)) && kinds(tb) & MAP != 0) {
+                    if let (Some(k), Some(st)) = (self.access_key(&n), s.as_ref()) {
+                        let safe = if children(&n).iter().any(|c| c.kind() == "?") { NIL } else { NONE };
+                        if let Some(t) = st.get(&map_key(self.text(b), &k)) {
+                            return self.note(n, *t | safe);
+                        }
+                        if st.contains_key(&map_all(self.text(b))) {
+                            return self.note(n, NIL);
+                        }
                     }
                 }
                 // a[i] of an array: an element, or nil out of range (in range when k is constant and below a[]'s
@@ -957,6 +1098,11 @@ impl<'a> Infer<'a> {
                         if let (Some(len), true, Some(st)) = (self.literal_len(&r), self.locals.contains(self.text(&l)), s.as_mut()) {
                             st.insert(len_key(self.text(&l)), len);
                         }
+                        if let (Some(entries), true) = (self.map_literal(&r), self.locals.contains(self.text(&l))) {
+                            if let Some(st) = s.as_mut() {
+                                self.set_map(st, self.text(&l), entries);
+                            }
+                        }
                     }
                     // a[] = x, a[i] = x: the array also holds x now
                     "array_append" | "map_access" if !children(&l).iter().any(|c| c.kind() == ".") => {
@@ -979,6 +1125,15 @@ impl<'a> Infer<'a> {
                             if let (Some(n), true, Some(st)) = (new, kinds(cur) & ARRAY != 0 && self.locals.contains(self.text(&base)), s.as_mut()) {
                                 st.insert(len_key(self.text(&base)), n);
                             }
+                            if l.kind() == "map_access" && kinds(cur) & MAP != 0 && self.locals.contains(self.text(&base)) {
+                                let key = self.access_key(&l);
+                                if let Some(st) = s.as_mut() {
+                                    match key {
+                                        Some(k) => { st.insert(map_key(self.text(&base), &k), tr); }
+                                        None => forget_map(st, self.text(&base)), // m[x] = v may hit any key
+                                    }
+                                }
+                            }
                         }
                     }
                     // obj.name = x: a local of another object (not a map key)
@@ -989,6 +1144,14 @@ impl<'a> Infer<'a> {
                         if let (Some(key), true) = (nc.get(1), tb & OBJECT != 0) {
                             let def = nc.first().and_then(|b| self.receiver_def(b));
                             self.out.member_writes.entry(self.text(key).to_string()).or_default().push((def, tr));
+                        }
+                        // m.key = v on a map variable
+                        if let (Some(base), Some(k)) = (nc.first().filter(|b| b.kind() == "identifier" && tb & MAP != 0), self.access_key(&l)) {
+                            if self.locals.contains(self.text(base)) {
+                                if let Some(st) = s.as_mut() {
+                                    st.insert(map_key(self.text(base), &k), tr);
+                                }
+                            }
                         }
                     }
                     // LocalN("name"[, obj]) = x
