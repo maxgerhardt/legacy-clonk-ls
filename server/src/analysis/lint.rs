@@ -29,6 +29,7 @@ pub const CODES: &[(&str, &str)] = &[
     ("id-label", "a name that looks like an ID before ( or :"),
     ("local-in-global", "a local used in a global func"),
     ("string-table", "$Name$ not in the string table"),
+    ("func-desc", "a [..|Image=..|Condition=..] function description the engine reads differently"),
     ("unused-var", "a var that is never read"),
     ("unused-param", "a parameter of a private function that is never used"),
     ("unused-local", "a local/static no script reads"),

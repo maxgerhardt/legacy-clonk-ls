@@ -320,8 +320,47 @@ pub fn complete(index: &Index, info: &FileInfo, src: &str, pos: Position, trigge
     let line = &src[line_start..start];
     let mut items = Items { out: vec![], seen: HashSet::new(), paren_follows: src[at..].trim_start().starts_with('(') };
 
-    // `// NOLINT(`, `// c4lint: ignore(`: the diagnostic codes (lint.rs suppression comments)
     let to_cursor = &src[line_start..start];
+    // [Text|Image=..|Condition=..|Method=..] function descriptions (funcdesc.rs): keys after '|', values after '='
+    let trimmed = to_cursor.trim_start();
+    if trimmed.starts_with('[') && !trimmed.contains(']') && !trimmed.contains("//") {
+        let Some(bar) = trimmed.rfind('|') else { return None }; // the menu text itself
+        let seg = &trimmed[bar + 1..];
+        match seg.split_once('=') {
+            None => {
+                for (k, what) in super::funcdesc::KEYS {
+                    items.add(k, CompletionItemKind::PROPERTY, what.to_string(), None, 0);
+                    if let Some(last) = items.out.last_mut().filter(|i| i.label == *k) {
+                        last.insert_text = Some(format!("{}=", k));
+                    }
+                }
+            }
+            Some(("Condition", _)) => {
+                let mut names: Vec<&str> = index.scope_files(info).iter().flat_map(|f| f.funcs.iter().map(|d| d.name.as_str())).collect();
+                names.sort();
+                names.dedup();
+                for n in names {
+                    items.add(n, CompletionItemKind::FUNCTION, "function of this script (the entry shows when it returns true)".to_string(), None, 0);
+                }
+            }
+            Some(("Image", _)) => {
+                items.add("Contents", CompletionItemKind::CONSTANT, "the picture of the object's first contents".to_string(), None, 0);
+                let mut ids: Vec<(&String, Option<String>)> = index.ids.iter().map(|(id, v)| (id, v.first().and_then(|i| i.name.clone()))).collect();
+                ids.sort();
+                for (id, name) in ids {
+                    items.add(id, CompletionItemKind::CLASS, name.unwrap_or_default(), None, 0);
+                }
+            }
+            Some(("Method", _)) => {
+                for m in super::funcdesc::METHODS {
+                    items.add(m, CompletionItemKind::ENUM_MEMBER, "control style that shows the entry".to_string(), None, 0);
+                }
+            }
+            _ => return None,
+        }
+        return Some(items.out);
+    }
+    // `// NOLINT(`, `// c4lint: ignore(`: the diagnostic codes (lint.rs suppression comments)
     if let Some(c) = to_cursor.find("//").or_else(|| to_cursor.rfind("/*")).map(|i| &to_cursor[i..]) {
         if let Some(open) = c.rfind('(') {
             if !c[open..].contains(')') && (c[..open].contains("NOLINT") || c[..open].contains("c4lint:")) {

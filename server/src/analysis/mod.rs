@@ -5,6 +5,7 @@ pub mod complete;
 pub mod diagnostics;
 pub mod engine;
 pub mod format;
+pub mod funcdesc;
 pub mod index;
 pub mod ini;
 pub mod lint;

@@ -185,6 +185,27 @@ impl Highlighter {
                     "translation" => {
                         Self::add_token(ctx, ctx.token_types.translation, &node);
                     },
+                    // [Text|Image=ID|Condition=Func|Method=...]: each piece in its own color (analysis/funcdesc.rs)
+                    "func_desc" if !src.text.is_empty() && node.start_position().row == node.end_position().row => {
+                        use crate::analysis::funcdesc::{parts, Kind};
+                        let text = &src.text[node.start_byte()..node.end_byte()];
+                        let row = node.start_position().row;
+                        let col0 = node.start_position().column;
+                        let at = |c: usize| tree_sitter::Point { row, column: col0 + c };
+                        for p in parts(text) {
+                            let t = match p.kind {
+                                Kind::Text | Kind::Other => ctx.token_types.string,
+                                Kind::Translation => ctx.token_types.translation,
+                                Kind::Punct => ctx.token_types.operator,
+                                Kind::Key => ctx.token_types.property,
+                                Kind::Id => ctx.token_types.id,
+                                Kind::Phase => ctx.token_types.number,
+                                Kind::Constant => ctx.token_types.enum_member,
+                                Kind::Function => ctx.token_types.method,
+                            };
+                            add_semantic_token_at(ctx, t, at(p.start), at(p.end));
+                        }
+                    },
                     "pragma_strict" => {
                         Self::add_token(
                             ctx,

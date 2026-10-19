@@ -24,6 +24,17 @@ pub fn target_at<'t>(tree: &'t Tree, src: &str, li: &LineIndex, pos: Position) -
     let n = tree.root_node().named_descendant_for_point_range(p, p)?;
     let text = node_text(&n, src).to_string();
     match n.kind() {
+        // [Text|Image=ID|Condition=Func]: the ID or the condition function under the cursor
+        "func_desc" => {
+            let at = li.to_byte(pos).checked_sub(n.start_byte())?;
+            let part = super::funcdesc::part_at(&text, at)?;
+            let value = text[part.start..part.end].to_string();
+            match part.kind {
+                super::funcdesc::Kind::Id => Some(Target::Id { id: value }),
+                super::funcdesc::Kind::Function => Some(Target::FuncDef { name: value }),
+                _ => None,
+            }
+        }
         "id" => Some(Target::Id { id: text }),
         "identifier" if is_map_key(&n) => Some(Target::MapKey { name: text, node: n }),
         "identifier" => {
@@ -89,6 +100,21 @@ pub fn hover(index: &Index, info: &FileInfo, tree: &Tree, src: &str, pos: Positi
     let li = LineIndex::new(src);
     if let Some((name, _, _)) = super::strings::ref_at(src, li.to_byte(pos)) {
         return Some(super::strings::hover(&info.path, &name));
+    }
+    // Condition=Func of a function description: the function, like a call
+    let p = li.to_point(pos);
+    if let Some(n) = tree.root_node().named_descendant_for_point_range(p, p).filter(|n| n.kind() == "func_desc") {
+        let text = node_text(&n, src);
+        if let Some(part) = super::funcdesc::part_at(text, li.to_byte(pos).saturating_sub(n.start_byte())) {
+            if part.kind == super::funcdesc::Kind::Function {
+                let name = &text[part.start..part.end];
+                let defs = index.visible_funcs(info, name);
+                let parts: Vec<String> = defs.iter().take(3).map(|(f, d)| func_markdown(f, d, index)).collect();
+                if !parts.is_empty() {
+                    return Some(format!("*condition of this menu entry: shown when it returns true*\n\n{}", parts.join("\n\n---\n\n")));
+                }
+            }
+        }
     }
     match target_at(tree, src, &li, pos)? {
         Target::Call { name, arrow, node } => {

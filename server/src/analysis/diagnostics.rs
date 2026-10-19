@@ -204,7 +204,11 @@ impl<'a> Ctx<'a> {
                 }
                 return;
             }
-            "comment" | "string" | "func_desc" | "pragma_strict" => return,
+            "func_desc" => {
+                self.check_func_desc(&n);
+                return;
+            }
+            "comment" | "string" | "pragma_strict" => return,
             _ => {}
         }
         for c in named_children(&n) {
@@ -454,6 +458,20 @@ impl<'a> Ctx<'a> {
                 format!("call to \"{}\" parameter {}: got \"{}\", but expected \"{}\" ({}): fails at runtime{}",
                     name, i + 1, got, ty, pname, hint)));
             break; // the engine stops at the first parameter it can't convert
+        }
+    }
+
+    /// func-desc: what the engine silently passes over in `[Text|Image=..|Condition=..|Method=..]` (funcdesc.rs):
+    /// a Condition function the script doesn't have (the entry always shows), an unknown Image ID, Method value or
+    /// key.
+    fn check_func_desc(&mut self, n: &Node) {
+        let text = node_text(n, self.src);
+        let (index, info) = (self.index, self.info);
+        let has_func = |f: &str| !index.visible_funcs(info, f).is_empty() || ENGINE.functions.contains_key(f);
+        let has_id = |i: &str| info.def_id.as_deref() == Some(i) || index.id_for(i, &info.path).is_some() || standard_id(i).is_some();
+        for (s, e, msg) in super::funcdesc::problems(text, has_func, has_id) {
+            let range = tower_lsp::lsp_types::Range::new(self.li.byte_to_lsp(n.start_byte() + s), self.li.byte_to_lsp(n.start_byte() + e));
+            self.out.push(diag(range, DiagnosticSeverity::WARNING, "func-desc", msg));
         }
     }
 
