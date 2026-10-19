@@ -317,6 +317,11 @@ pub fn references(index: &Index, info: &FileInfo, tree: &Tree, src: &str, pos: P
                 for c in f.calls.iter().filter(|c| c.name == name) {
                     out.extend(loc(&f.path, c.range));
                 }
+                // [..|Condition=Name] uses it too
+                for (n, r) in f.desc_refs.iter().filter(|(n, _)| *n == name) {
+                    let _ = n;
+                    out.extend(loc(&f.path, *r));
+                }
                 if include_decl {
                     for d in f.funcs.iter().filter(|d| d.name == name) {
                         out.extend(loc(&f.path, d.name_range));

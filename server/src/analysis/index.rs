@@ -74,6 +74,8 @@ pub struct FileInfo {
     pub vars: Vec<VarDef>,
     pub calls: Vec<CallSite>,
     pub id_refs: Vec<(String, Range)>,
+    /// functions named in `[..|Condition=Func]` function descriptions (find references)
+    pub desc_refs: Vec<(String, Range)>,
     /// script variables assigned in a function: (name, function index, member) - member = obj.name = x or
     /// LocalN("name") = x, else a plain assignment of a name that isn't a parameter/var of the function
     pub writes: Vec<(String, usize, bool)>,
@@ -591,6 +593,7 @@ pub fn extract(path: &Path, src: &str, tree: &Tree) -> FileInfo {
         funcs: vec![],
         vars: vec![],
         calls: vec![],
+        desc_refs: vec![],
         string_words: HashSet::new(),
         string_prefixes: HashSet::new(),
         own_string_words: HashSet::new(),
@@ -678,11 +681,19 @@ pub fn extract(path: &Path, src: &str, tree: &Tree) -> FileInfo {
             "id" => info.id_refs.push((node_text(&n, src).to_string(), li.node_range(&n))),
             // names in strings may be called by name (Schedule("F()"), Call("F"), menus, commands): callers.rs
             // [Desc|Condition=Func]: the engine evaluates Func on the object (context menu entries)
+            // the Condition function is called by name, the Image ID is an ID reference (funcdesc.rs)
             "func_desc" => {
                 let text = node_text(&n, src);
-                for part in text.split('|') {
-                    if let Some(f) = part.trim().strip_prefix("Condition=") {
-                        info.own_string_words.insert(f.trim_end_matches(']').trim().to_string());
+                for p in super::funcdesc::parts(text) {
+                    let value = text[p.start..p.end].to_string();
+                    let range = Range::new(li.byte_to_lsp(n.start_byte() + p.start), li.byte_to_lsp(n.start_byte() + p.end));
+                    match p.kind {
+                        super::funcdesc::Kind::Function => {
+                            info.own_string_words.insert(value.clone());
+                            info.desc_refs.push((value, range));
+                        }
+                        super::funcdesc::Kind::Id => info.id_refs.push((value, range)),
+                        _ => {}
                     }
                 }
             }
@@ -1004,7 +1015,12 @@ impl Index {
             .last()?
             .to_path_buf();
         let key = path_key(&outermost);
-        let inside = |base: &PathBuf| key.starts_with(&path_key(base));
+        // a whole path component: C:/temp/clonkdemo is not inside C:/temp/clonk
+        let inside = |base: &PathBuf| {
+            let b = path_key(base);
+            let b = b.trim_end_matches('/');
+            key == b || key.starts_with(&format!("{}/", b))
+        };
         if self.roots.iter().any(inside) || self.covered.iter().any(inside) {
             return None;
         }
@@ -1399,4 +1415,17 @@ fn prefix_through(key: &str, ext: &str, dir_only: bool) -> Option<String> {
 fn folder_prefixes(scenario: &str) -> Vec<String> {
     let segs: Vec<&str> = scenario.trim_end_matches('/').split('/').collect();
     (0..segs.len()).filter(|&i| segs[i].ends_with(".c4f")).map(|i| format!("{}/", segs[..=i].join("/"))).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cover_compares_whole_path_components() {
+        // a folder next to the root whose name starts with the root's name is outside it
+        let mut index = Index { roots: vec![PathBuf::from("C:/x/clonk")], ..Default::default() };
+        assert!(index.cover(Path::new("C:/x/clonkdemo/Demo.c4s/Script.c")).is_some());
+        assert!(index.cover(Path::new("C:/x/clonk/scenarios/In.c4s/Script.c")).is_none());
+    }
 }
