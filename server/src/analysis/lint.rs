@@ -351,3 +351,22 @@ pub fn unused_funcs(index: &Index, info: &FileInfo, out: &mut Vec<Diagnostic>) {
         out.push(diag(f.name_range, level, "unused-func", msg));
     }
 }
+
+/// Hover on a diagnostic code inside a NOLINT / c4lint comment on the line: what it means.
+pub fn code_hover(src: &str, line: u32, character: u32) -> Option<String> {
+    let text = src.split('\n').nth(line as usize)?;
+    let comment = text.find("//").or_else(|| text.find("/*"))?;
+    if !(text[comment..].contains("NOLINT") || text[comment..].contains("c4lint:")) {
+        return None;
+    }
+    // the word at the cursor (characters are UTF-16 units; comments with codes are ASCII here)
+    let col = (character as usize).min(text.len());
+    if col < comment {
+        return None;
+    }
+    let is_code = |c: char| c.is_ascii_alphanumeric() || c == '-';
+    let start = text[..col].rfind(|c: char| !is_code(c)).map(|i| i + 1).unwrap_or(0);
+    let end = text[col..].find(|c: char| !is_code(c)).map(|i| col + i).unwrap_or(text.len());
+    let word = &text[start..end];
+    CODES.iter().find(|(c, _)| *c == word).map(|(c, what)| format!("**{}**: {}", c, what))
+}

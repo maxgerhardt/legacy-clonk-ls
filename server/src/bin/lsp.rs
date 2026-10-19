@@ -779,6 +779,10 @@ impl LanguageServer for Backend {
                 range: None,
             }));
         }
+        // a code in a NOLINT comment
+        if let Some(text) = self.documents.get(&uri).and_then(|d| legacy_clonk_ls::analysis::lint::code_hover(&d.source, pos.line, pos.character)) {
+            return Ok(Some(Hover { contents: HoverContents::Markup(MarkupContent { kind: MarkupKind::Markdown, value: text }), range: None }));
+        }
         if let Some(text) = self.with_script(&uri, |idx, info, doc| query::hover(idx, info, &doc.tree, &doc.source, pos)).flatten() {
             return Ok(Some(Hover {
                 contents: HoverContents::Markup(MarkupContent { kind: MarkupKind::Markdown, value: text }),
