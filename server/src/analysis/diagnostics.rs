@@ -194,7 +194,12 @@ impl<'a> Ctx<'a> {
             }
             "nil" if self.strict < 3 => self.strict_error(&n, "unknown identifier: nil (nil is a keyword only in #strict 3)"),
             "method_call" => self.check_call(&n),
-            "binary_expression" | "unary_expression" => self.check_operator(&n),
+            "binary_expression" | "unary_expression" => {
+                self.check_operator(&n);
+                if n.kind() == "binary_expression" && lint_enabled() {
+                    self.check_action_compare(&n);
+                }
+            }
             "identifier" => self.check_identifier(&n),
             "id" => self.check_id(&n),
             // #include/#appendto: only the target ID matters (it may not be loaded by this scenario)
@@ -239,6 +244,9 @@ impl<'a> Ctx<'a> {
         }
         if KEYWORDS.contains(&name) {
             return;
+        }
+        if lint_enabled() {
+            self.check_asset_call(n, name);
         }
         let args = n.child_by_field_name("args").map(|a| named_children(&a).iter().filter(|c| c.kind() != "comment").count()).unwrap_or(0);
         let range = self.li.node_range(&name_node);
@@ -459,6 +467,140 @@ impl<'a> Ctx<'a> {
                     name, i + 1, got, ty, pname, hint)));
             break; // the engine stops at the first parameter it can't convert
         }
+    }
+
+    /// A literal string argument's text (not with $..$ or %.. that change it).
+    fn literal(&self, n: &Node) -> Option<String> {
+        if n.kind() != "string" {
+            return None;
+        }
+        let t = node_text(n, self.src);
+        let inner = t.strip_prefix('"')?.strip_suffix('"')?;
+        (!inner.contains('$') && !inner.contains('\\')).then(|| inner.to_string())
+    }
+
+    /// The definitions an object expression can be of (`this` when None): objids.
+    fn object_ids(&self, obj: Option<&Node>, at: &Node) -> Option<Vec<String>> {
+        match obj {
+            Some(o) if !(o.kind() == "identifier" && node_text(o, self.src) == "this") => {
+                if matches!(o.kind(), "nil") || node_text(o, self.src) == "0" {
+                    super::objids::this_ids_at(self.index, self.info, self.src, at)
+                } else {
+                    super::objids::ids_of(self.index, self.info, self.src, o)
+                }
+            }
+            _ => super::objids::this_ids_at(self.index, self.info, self.src, at),
+        }
+    }
+
+    /// action-name / sound-name / graphics-name (assets.rs): a literal name the engine won't find does nothing,
+    /// silently (SetAction/ObjectSetAction false, no sound, SetGraphics false).
+    fn check_asset_call(&mut self, n: &Node, name: &str) {
+        let args: Vec<Node> = n.child_by_field_name("args").map(|a| named_children(&a)).unwrap_or_default()
+            .into_iter().filter(|c| c.kind() != "comment").collect();
+        let arrow = super::index::is_arrow_call(n);
+        let receiver = if arrow { n.parent().and_then(|p| named_children(&p).into_iter().find(|c| c.kind() != "comment")) } else { None };
+        match name {
+            "Sound" | "SoundLevel" if !arrow => {
+                let Some((s, text)) = args.first().and_then(|a| self.literal(a).map(|t| (*a, t))) else { return };
+                if text.is_empty() {
+                    return;
+                }
+                if let (Some(false), other) = super::assets::sound_found(self.index, &text) {
+                    let hint = match other {
+                        Some(o) => format!(" (there is {}: without an extension the engine only looks for .wav, write \"{}\")", o,
+                            if text.contains('.') { text.clone() } else { format!("{}.{}", text, o.rsplit('.').next().unwrap_or("ogg")) }),
+                        None => " (looked in Sound.c4g and the indexed definitions; a '*' stands for exactly one character)".to_string(),
+                    };
+                    self.out.push(diag(self.li.node_range(&s), DiagnosticSeverity::WARNING, "sound-name",
+                        format!("sound \"{}\" not found: Sound() plays nothing{}", text, hint)));
+                }
+            }
+            "SetAction" | "ObjectSetAction" => {
+                let (obj, name_arg) = if name == "ObjectSetAction" { (args.first(), args.get(1)) } else { (receiver.as_ref(), args.first()) };
+                let Some((s, text)) = name_arg.and_then(|a| self.literal(a).map(|t| (*a, t))) else { return };
+                self.check_action_name(&s, &text, obj, n, &format!("{}() does nothing and returns false", name));
+            }
+            "SetGraphics" if !arrow => {
+                let Some((s, text)) = args.first().and_then(|a| self.literal(a).map(|t| (*a, t))) else { return };
+                if text.is_empty() {
+                    return;
+                }
+                // overlays (4th parameter) with an object or another mode: not checked
+                if args.len() > 3 {
+                    return;
+                }
+                let ids: Option<Vec<String>> = match args.get(2) {
+                    Some(id) if id.kind() == "id" => Some(vec![node_text(id, self.src).to_string()]),
+                    Some(other) if !(other.kind() == "nil" || node_text(other, self.src) == "0") => None,
+                    _ => self.object_ids(args.get(1), n),
+                };
+                let Some(ids) = ids else { return };
+                let dirs: Vec<(String, std::path::PathBuf)> = ids.iter().filter_map(|i| super::assets::def_dir(self.index, self.info, i).map(|d| (i.clone(), d))).collect();
+                if dirs.len() != ids.len() || dirs.is_empty() {
+                    return;
+                }
+                let low = text.to_lowercase();
+                if !dirs.iter().any(|(_, d)| super::assets::graphics(d).contains(&low)) {
+                    let names: Vec<String> = dirs.iter().map(|(i, _)| i.clone()).collect();
+                    self.out.push(diag(self.li.node_range(&s), DiagnosticSeverity::WARNING, "graphics-name",
+                        format!("no Graphics{}.png/.bmp in {}: SetGraphics(\"{}\") does nothing and returns false", text, names.join(" / "), text)));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// An action name for an object of `obj` (this when None): in the ActMap of one of its definitions?
+    fn check_action_name(&mut self, s: &Node, text: &str, obj: Option<&Node>, at: &Node, effect: &str) {
+        if text == "Idle" || text == "ActIdle" {
+            return;
+        }
+        let Some(ids) = self.object_ids(obj, at) else { return };
+        let Some(cands) = super::assets::candidate_actions(self.index, self.info, &ids) else { return };
+        if cands.iter().any(|(_, acts)| acts.iter().any(|a| a == text)) {
+            return;
+        }
+        let names: Vec<String> = cands.iter().map(|(i, _)| i.clone()).collect();
+        let mut known: Vec<String> = cands.iter().flat_map(|(_, a)| a.iter().cloned()).collect();
+        known.sort();
+        known.dedup();
+        let close = known.iter().find(|k| k.eq_ignore_ascii_case(text)).map(|k| format!(" (the names are case-sensitive: \"{}\")", k)).unwrap_or_default();
+        let list = if known.len() > 10 { format!("{}, ...", known[..10].join(", ")) } else { known.join(", ") };
+        self.out.push(diag(self.li.node_range(s), DiagnosticSeverity::WARNING, "action-name",
+            format!("action \"{}\" isn't in the ActMap of {}: {}{}; its actions: {}", text, names.join(" / "), effect, close, list)));
+    }
+
+    /// GetAction() == "Name" (also obj->GetAction(), GetAction(obj), eq, S=, !=, ne): a name the object's ActMap
+    /// doesn't have never compares equal.
+    fn check_action_compare(&mut self, n: &Node) {
+        let op = super::index::children(n).iter().find(|c| !c.is_named() && !matches!(c.kind(), "(" | ")")).map(|c| c.kind().to_string()).unwrap_or_default();
+        if !matches!(op.as_str(), "==" | "!=" | "eq" | "ne" | "S=") {
+            return;
+        }
+        let parts: Vec<Node> = named_children(n).into_iter().filter(|c| c.kind() != "comment").collect();
+        let (Some(a), Some(b)) = (parts.first(), parts.get(1)) else { return };
+        let (call, s) = if self.literal(b).is_some() { (*a, *b) } else if self.literal(a).is_some() { (*b, *a) } else { return };
+        // GetAction(obj) / GetAction() / obj->GetAction()
+        let (inner, obj) = match call.kind() {
+            "method_call" if !super::index::is_arrow_call(&call) => {
+                let args: Vec<Node> = call.child_by_field_name("args").map(|x| named_children(&x)).unwrap_or_default().into_iter().filter(|c| c.kind() != "comment").collect();
+                (call, args.first().copied())
+            }
+            "arrow_expression" => {
+                let nc: Vec<Node> = named_children(&call).into_iter().filter(|c| c.kind() != "comment").collect();
+                match (nc.first(), nc.get(1)) {
+                    (Some(o), Some(m)) if m.kind() == "method_call" => (*m, Some(*o)),
+                    _ => return,
+                }
+            }
+            _ => return,
+        };
+        if inner.child_by_field_name("name").map(|x| node_text(&x, self.src) != "GetAction").unwrap_or(true) {
+            return;
+        }
+        let text = self.literal(&s).unwrap_or_default();
+        self.check_action_name(&s, &text, obj.as_ref(), n, "the comparison is never true");
     }
 
     /// func-desc: what the engine silently passes over in `[Text|Image=..|Condition=..|Method=..]` (funcdesc.rs):

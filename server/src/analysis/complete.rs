@@ -397,6 +397,33 @@ pub fn complete(index: &Index, info: &FileInfo, src: &str, pos: Position, trigge
             }
             return Some(items.out);
         }
+        // asset names (assets.rs): SetAction("|  ObjectSetAction(obj, "|  GetAction() == "|  Sound("|
+        let before = line[..line.len() - last.text.len()].trim_end();
+        let compact: String = before.chars().filter(|c| !c.is_whitespace()).collect();
+        let action_ctx = compact.ends_with("SetAction(") || (compact.contains("ObjectSetAction(") && compact.ends_with(','))
+            || ["GetAction()==", "GetAction()!=", "GetAction()eq", "GetAction()ne", "GetAction()S="].iter().any(|p| compact.ends_with(p));
+        if action_ctx {
+            if let Some(acts) = info.path.parent().and_then(super::assets::actions) {
+                for a in acts.iter().chain(std::iter::once(&"Idle".to_string())) {
+                    items.add(a, CompletionItemKind::ENUM_MEMBER, "action of this definition's ActMap".to_string(), None, 0);
+                }
+                return Some(items.out);
+            }
+        }
+        if compact.ends_with("Sound(") || compact.ends_with("SoundLevel(") {
+            let mut names: Vec<String> = index.sounds.iter().cloned().collect();
+            if let Some(g) = &index.game_dir {
+                names.extend(super::assets::game_sounds(g));
+            }
+            names.sort();
+            names.dedup();
+            for n in names {
+                // the engine appends .wav itself; other extensions must be written
+                let label = n.strip_suffix(".wav").map(|s| s.to_string()).unwrap_or(n.clone());
+                items.add(&label, CompletionItemKind::FILE, n.clone(), None, 0);
+            }
+            return Some(items.out);
+        }
         return None;
     }
 

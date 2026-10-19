@@ -632,6 +632,12 @@ pub fn receiver_ids(index: &Index, info: &FileInfo, src: &str, call: &Node) -> O
     resolvable(index, info, ctx.expr(&target)?)
 }
 
+/// The definitions `this` can be at `node` (its own + includers, #appendto targets); None when unknown.
+pub fn this_ids_at(index: &Index, info: &FileInfo, src: &str, node: &Node) -> Option<Vec<String>> {
+    let ctx = IdCtx::new(index, info, src, enclosing_function(node));
+    ctx.this_ids().map(|s| s.into_iter().collect())
+}
+
 /// IDs of a variable / expression node (hover); None when unknown or not an object.
 pub fn ids_of(index: &Index, info: &FileInfo, src: &str, node: &Node) -> Option<Vec<String>> {
     if !super::diagnostics::object_ids_enabled() {

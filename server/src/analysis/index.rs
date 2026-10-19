@@ -264,6 +264,10 @@ pub struct Index {
     pub scenario_packs: HashMap<String, Vec<String>>,
     /// Extra folders indexed because a script inside them was opened (see `cover`)
     pub covered: Vec<PathBuf>,
+    /// sound files (lowercase names) in the indexed folders and packs (assets.rs)
+    pub sounds: HashSet<String>,
+    /// the game folder (its packed Sound.c4g is listed by assets::game_sounds)
+    pub game_dir: Option<PathBuf>,
     /// Name tables for fast lookups, built on first use and reset by every change of `files`
     lookup: std::sync::OnceLock<Lookup>,
     /// scope_files results ("<script>|<#include/#appendto lines>" -> file keys after the script itself); reset with
@@ -407,6 +411,8 @@ struct Found {
     scripts: Vec<PathBuf>,
     defcores: Vec<PathBuf>,
     scenarios: Vec<PathBuf>,
+    /// sound files (lowercase names) in Clonk folders (assets.rs)
+    sounds: Vec<String>,
 }
 
 /// Walk `dir` and remember scripts, DefCore.txt and Scenario.txt. Uses the directory entry's file type
@@ -436,6 +442,8 @@ fn collect_dir(dir: &Path, seen: &mut HashSet<String>, found: &mut Found) {
             found.defcores.push(entry.path());
         } else if name.eq_ignore_ascii_case("Scenario.txt") {
             found.scenarios.push(entry.path());
+        } else if [".wav", ".ogg", ".mp3"].iter().any(|e| name.len() > 4 && name[name.len() - 4..].eq_ignore_ascii_case(e)) {
+            found.sounds.push(name.to_lowercase());
         } else if name.len() > 2 && name[name.len() - 2..].eq_ignore_ascii_case(".c") {
             // the engine only loads Script.c of definitions/scenarios and the *.c files of System.c4g groups
             let p = entry.path();
@@ -860,6 +868,7 @@ impl Index {
         for p in &found.scenarios {
             self.collect_definitions(p);
         }
+        self.sounds.extend(found.sounds);
         let t_meta = t.elapsed();
         for (key, info) in parse_scripts_parallel(&found.scripts) {
             self.files.insert(key, info);
@@ -1050,6 +1059,10 @@ impl Index {
             self.scenario_packs.entry(k).or_insert(v);
         }
         self.covered.extend(other.covered);
+        self.sounds.extend(other.sounds);
+        if self.game_dir.is_none() {
+            self.game_dir = other.game_dir;
+        }
     }
 
     /// Is a pack with this file name (e.g. "Objects.c4d") already indexed as a folder somewhere?
@@ -1335,7 +1348,7 @@ pub fn game_packs_to_index(index: &Index, game_dir: &Path, all: bool) -> Vec<Str
 /// cache folder (keyed by size and modification time, so an updated pack is unpacked again); the originals
 /// are never modified. Returns the new index and log lines.
 pub fn index_game_packs(game_dir: &Path, packs: &[String]) -> (Index, Vec<String>) {
-    let mut index = Index::default();
+    let mut index = Index { game_dir: Some(game_dir.to_path_buf()), ..Default::default() };
     let mut log = vec![];
     let mut parser = new_parser();
     let mut seen = HashSet::new();
