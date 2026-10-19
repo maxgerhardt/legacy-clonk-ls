@@ -485,7 +485,13 @@ pub fn workspace_symbols(index: &Index, query: &str) -> Vec<SymbolInformation> {
 pub fn rename_targets(index: &Index, info: &FileInfo, tree: &Tree, src: &str, pos: Position) -> Result<(Range, String, Vec<Location>), String> {
     let li = LineIndex::new(src);
     let p = li.to_point(pos);
-    let at = tree.root_node().named_descendant_for_point_range(p, p).filter(|n| n.kind() == "identifier").ok_or("nothing to rename here")?;
+    let at = tree.root_node().named_descendant_for_point_range(p, p).ok_or("nothing to rename here")?;
+    if at.kind() == "id" {
+        return Err("definition IDs can't be renamed (DefCore.txt, other scripts and Scenario.txt use them)".to_string());
+    }
+    if at.kind() != "identifier" {
+        return Err("nothing to rename here".to_string());
+    }
     let range = li.node_range(&at);
     let in_function = |func: Node, name: &str, keys: bool| -> Vec<Location> {
         let mut out = vec![];
@@ -514,7 +520,7 @@ pub fn rename_targets(index: &Index, info: &FileInfo, tree: &Tree, src: &str, po
             let defs = index.visible_funcs(info, &name);
             let (def_file, def) = match defs.as_slice() {
                 [one] => *one,
-                [] => return Err(format!("\"{}\" is no script function of this definition", name)),
+                [] => return Err(format!("\"{}\" isn't a function of this script's definition (rename it in its own script; only private functions can be renamed)", name)),
                 _ => return Err(format!("\"{}\" is defined more than once (an overload chain): rename by hand", name)),
             };
             if def.visibility.as_deref() != Some("private") {
