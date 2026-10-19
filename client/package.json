@@ -119,6 +119,14 @@
 					"type": "boolean",
 					"default": false,
 					"description": "Warn about obj->F() where obj may be nil: it comes from a function that can find nothing (FindObject, FindObject2, Contained, Contents, GetCursor, ...) and no if (obj) / if (!obj) return; guards the call. nil->F() stops the script (also with ->~); obj?->F() is nil-safe. Needs typeChecks."
+				},
+				"legacy-clonk-ext.runtimeLogs": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"default": [],
+					"description": "Engine logs (Clonk.log) whose script errors show at their source lines (runtime errors with the call chain, compile errors the static check doesn't report). Empty: the game folder's Clonk.log. Watched while the editor runs; an edited script's entries disappear until the next run."
 				}
 			}
 		},

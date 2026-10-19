@@ -30,13 +30,89 @@ impl OwnSemanticTokenType {
 const NEGOTIATE_TOKENT_TYPES: bool = false;
 const LOG_TREE_UPDATE_POSITIONS: bool = false;
 
+/// Script errors from the engine's logs (analysis/runlog.rs) next to the static diagnostics of each script.
+#[derive(Default)]
+struct RuntimeLogs {
+    logs: RwLock<Vec<std::path::PathBuf>>,
+    /// (modified, length) of each log when it was read last
+    stamps: std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, (std::time::SystemTime, u64)>>,
+    /// the logs' entries by script (cleared for a script when it's edited)
+    diags: std::sync::Mutex<std::collections::HashMap<Url, Vec<Diagnostic>>>,
+    /// the last static diagnostics published per script
+    statics: std::sync::Mutex<std::collections::HashMap<Url, Vec<Diagnostic>>>,
+}
+
+impl RuntimeLogs {
+    /// Static diagnostics plus the log's entries for `uri` (an engine compile error our own check already reports
+    /// on that line isn't shown twice).
+    fn merged(&self, uri: &Url, statics: Vec<Diagnostic>) -> Vec<Diagnostic> {
+        let mut all = statics;
+        if let Some(r) = self.diags.lock().ok().and_then(|d| d.get(uri).cloned()) {
+            for d in r {
+                let dup = d.code == Some(NumberOrString::String("engine".to_string()))
+                    && all.iter().any(|s| s.range.start.line == d.range.start.line && s.severity == d.severity);
+                if !dup {
+                    all.push(d);
+                }
+            }
+        }
+        all
+    }
+
+    /// Re-read the logs that changed; the scripts whose log entries changed, with their merged diagnostics.
+    fn poll(&self, index: &RwLock<Index>) -> Vec<(Url, Vec<Diagnostic>)> {
+        let logs = self.logs.read().map(|l| l.clone()).unwrap_or_default();
+        let mut changed = false;
+        if let Ok(mut st) = self.stamps.lock() {
+            for l in &logs {
+                let stamp = std::fs::metadata(l).ok().map(|m| (m.modified().unwrap_or(std::time::UNIX_EPOCH), m.len()));
+                match stamp {
+                    Some(s) if st.get(l) != Some(&s) => {
+                        st.insert(l.clone(), s);
+                        changed = true;
+                    }
+                    None if st.remove(l).is_some() => changed = true,
+                    _ => {}
+                }
+            }
+        }
+        if !changed {
+            return vec![];
+        }
+        let mut entries = vec![];
+        for l in &logs {
+            if let Ok(bytes) = std::fs::read(l) {
+                entries.extend(legacy_clonk_ls::analysis::runlog::parse(&legacy_clonk_ls::analysis::text::decode_bytes(&bytes)));
+            }
+        }
+        let new = match index.read() {
+            Ok(i) => legacy_clonk_ls::analysis::runlog::diagnostics(&entries, &i),
+            Err(_) => return vec![],
+        };
+        let old = match self.diags.lock() {
+            Ok(mut d) => std::mem::replace(&mut *d, new.clone()),
+            Err(_) => return vec![],
+        };
+        let mut uris: Vec<Url> = old.keys().chain(new.keys()).cloned().collect();
+        uris.sort();
+        uris.dedup();
+        uris.into_iter().filter(|u| old.get(u) != new.get(u)).map(|u| {
+            let statics = self.statics.lock().ok().and_then(|s| s.get(&u).cloned()).unwrap_or_default();
+            let all = self.merged(&u, statics);
+            (u, all)
+        }).collect()
+    }
+}
+
 struct Backend {
     client: Client,
     token_types: RwLock<TokenTypes>,
     documents: DashMap<Url, Document>,
     workspace: RwLock<Workspace>,
     /// C4Script index of all scripts below the workspace roots
-    index: RwLock<Index>,
+    index: std::sync::Arc<RwLock<Index>>,
+    /// script errors from Clonk.log (analysis/runlog.rs), polled by a background task
+    runtime: std::sync::Arc<RuntimeLogs>,
     /// game folder (initializationOptions.gameDir / env C4LS_GAME_DIR) and whether to index all its packs
     game: RwLock<Option<(std::path::PathBuf, bool)>>,
     /// newest version of each changed document: a change only gets analysed when no newer one followed it
@@ -264,7 +340,11 @@ impl Backend {
 
     async fn refresh(&self, uri: Url) {
         if let Some(diags) = self.analyze(&uri) {
-            self.client.publish_diagnostics(uri, diags, None).await;
+            if let Ok(mut s) = self.runtime.statics.lock() {
+                s.insert(uri.clone(), diags.clone());
+            }
+            let all = self.runtime.merged(&uri, diags);
+            self.client.publish_diagnostics(uri, all, None).await;
         }
     }
 
@@ -405,6 +485,9 @@ impl LanguageServer for Backend {
                 game_dir = Some(std::path::PathBuf::from(g));
             }
             all_packs = opts.get("allPacks").and_then(|v| v.as_bool()).unwrap_or(false);
+            if let (Some(logs), Ok(mut l)) = (opts.get("runtimeLogs").and_then(|v| v.as_array()), self.runtime.logs.write()) {
+                l.extend(logs.iter().filter_map(|v| v.as_str()).filter(|s| !s.is_empty()).map(std::path::PathBuf::from));
+            }
             if let Some(langs) = opts.get("stringTableLanguages").and_then(|v| v.as_array()) {
                 legacy_clonk_ls::analysis::strings::set_languages(langs.iter().filter_map(|l| l.as_str().map(|s| s.to_string())).collect());
             }
@@ -514,6 +597,10 @@ impl LanguageServer for Backend {
         }
         let version = params.text_document.version;
         self.versions.insert(uri.clone(), version);
+        // Clonk.log's lines refer to the code before this edit
+        if let Ok(mut r) = self.runtime.diags.lock() {
+            r.remove(&uri);
+        }
         tokio::time::sleep(std::time::Duration::from_millis(150)).await;
         if self.versions.get(&uri).map(|v| *v) != Some(version) {
             return; // a newer change will publish
@@ -588,6 +675,28 @@ impl LanguageServer for Backend {
         self.client
             .log_message(MessageType::INFO, "server initialized")
             .await;
+        // Clonk.log: the configured logs (runtimeLogs, env C4LS_RUNTIME_LOGS), else the game folder's
+        if let Ok(mut l) = self.runtime.logs.write() {
+            if let Ok(env) = std::env::var("C4LS_RUNTIME_LOGS") {
+                l.extend(env.split(';').filter(|s| !s.is_empty()).map(std::path::PathBuf::from));
+            }
+            if l.is_empty() {
+                if let Some((g, _)) = self.game.read().ok().and_then(|g| g.clone()) {
+                    l.push(g.join("Clonk.log"));
+                }
+            }
+            tracing::info!("watching engine logs: {:?}", *l);
+        }
+        let (runtime, index, client) = (self.runtime.clone(), self.index.clone(), self.client.clone());
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                let changes = runtime.poll(&index);
+                for (uri, diags) in changes {
+                    client.publish_diagnostics(uri, diags, None).await;
+                }
+            }
+        });
         self.index_game_packs().await;
     }
 
@@ -830,7 +939,8 @@ async fn start_language_server() {
         client,
         documents: DashMap::new(),
         workspace: RwLock::new(Workspace::new()),
-        index: RwLock::new(Index::default()),
+        index: std::sync::Arc::new(RwLock::new(Index::default())),
+        runtime: std::sync::Arc::new(RuntimeLogs::default()),
         game: RwLock::new(None),
         versions: DashMap::new(),
     })

@@ -11,6 +11,7 @@ pub mod ini;
 pub mod lint;
 pub mod objids;
 pub mod query;
+pub mod runlog;
 pub mod strings;
 pub mod text;
 pub mod types;

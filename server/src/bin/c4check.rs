@@ -1,6 +1,6 @@
 //! Command-line checker: index the roots and print diagnostics for C4Script files.
 //!
-//! Usage: c4check [--root DIR]... [--game-dir DIR] [--all-packs] [--no-type-checks] [--no-field-types] [--no-object-ids] [--no-lint] [--nil-checks] [--create-may-fail] [--caller-inference] [--languages DE,US] [--errors-only] [PATH]...
+//! Usage: c4check [--root DIR]... [--game-dir DIR] [--all-packs] [--no-type-checks] [--no-field-types] [--no-object-ids] [--no-lint] [--runtime-log Clonk.log] [--nil-checks] [--create-may-fail] [--caller-inference] [--languages DE,US] [--errors-only] [PATH]...
 //!   --root DIR     folder to index (repeatable; default: current directory)
 //!   --game-dir DIR game folder (default: env C4LS_GAME_DIR): its Objects.c4d and the packs the scenarios
 //!                  name in [Definitions] are indexed too (packed groups are unpacked once into a cache)
@@ -16,6 +16,7 @@ fn main() {
     let mut roots = vec![];
     let mut targets = vec![];
     let mut errors_only = false;
+    let mut runtime_logs: Vec<PathBuf> = vec![];
     let mut game_dir = std::env::var_os("C4LS_GAME_DIR").filter(|v| !v.is_empty()).map(PathBuf::from);
     let mut all_packs = false;
     let mut args = std::env::args().skip(1);
@@ -23,6 +24,7 @@ fn main() {
         match a.as_str() {
             "--root" => roots.push(PathBuf::from(args.next().expect("--root needs a folder"))),
             "--errors-only" => errors_only = true,
+            "--runtime-log" => runtime_logs.push(PathBuf::from(args.next().expect("--runtime-log needs a Clonk.log"))),
             "--game-dir" => game_dir = Some(PathBuf::from(args.next().expect("--game-dir needs a folder"))),
             "--all-packs" => all_packs = true,
             "--languages" => legacy_clonk_ls::analysis::strings::set_languages(
@@ -35,7 +37,7 @@ fn main() {
             "--no-lint" => legacy_clonk_ls::analysis::diagnostics::LINT.store(false, std::sync::atomic::Ordering::Relaxed),
             "--nil-checks" => legacy_clonk_ls::analysis::diagnostics::NIL_CHECKS.store(true, std::sync::atomic::Ordering::Relaxed),
             "-h" | "--help" => {
-                eprintln!("usage: c4check [--root DIR]... [--game-dir DIR] [--all-packs] [--no-type-checks] [--no-field-types] [--no-object-ids] [--no-lint] [--nil-checks] [--create-may-fail] [--caller-inference] [--languages DE,US] [--errors-only] [PATH]...");
+                eprintln!("usage: c4check [--root DIR]... [--game-dir DIR] [--all-packs] [--no-type-checks] [--no-field-types] [--no-object-ids] [--no-lint] [--runtime-log Clonk.log] [--nil-checks] [--create-may-fail] [--caller-inference] [--languages DE,US] [--errors-only] [PATH]...");
                 return;
             }
             _ => targets.push(PathBuf::from(a)),
@@ -96,6 +98,27 @@ fn main() {
             let code = match &d.code { Some(tower_lsp::lsp_types::NumberOrString::String(s)) => s.clone(), _ => String::new() };
             println!("{}:{}:{}: {} [{}] {}", f.path.display(), d.range.start.line + 1, d.range.start.character + 1, label, code, d.message);
         }
+    }
+    // the engine's script errors from Clonk.log files (analysis/runlog.rs), after the static ones
+    for log in &runtime_logs {
+        let text = decode_bytes(&std::fs::read(log).unwrap_or_default());
+        let entries = legacy_clonk_ls::analysis::runlog::parse(&text);
+        let by_file = legacy_clonk_ls::analysis::runlog::diagnostics(&entries, &index);
+        let mut rows: Vec<(String, u32, u32, String)> = by_file.iter().flat_map(|(uri, ds)| {
+            let path = uri.to_file_path().map(|p| p.display().to_string()).unwrap_or_else(|_| uri.to_string());
+            ds.iter().map(move |d| {
+                let sev = if d.severity == Some(DiagnosticSeverity::ERROR) { "error" } else { "warning" };
+                let code = match &d.code { Some(tower_lsp::lsp_types::NumberOrString::String(c)) => c.clone(), _ => String::new() };
+                let chain: Vec<String> = d.related_information.iter().flatten().map(|r| format!("{} ({}:{})", r.message, r.location.uri.path().rsplit('/').next().unwrap_or(""), r.location.range.start.line + 1)).collect();
+                let chain = if chain.is_empty() { String::new() } else { format!(" [{}]", chain.join(", ")) };
+                (path.clone(), d.range.start.line + 1, d.range.start.character + 1, format!("{} [{}] {}{}", sev, code, d.message, chain))
+            }).collect::<Vec<_>>()
+        }).collect();
+        rows.sort();
+        for (path, line, col, rest) in rows {
+            println!("{}:{}:{}: {}", path, line, col, rest);
+        }
+        eprintln!("{}: {} script errors/warnings from the engine", log.display(), entries.len());
     }
     eprintln!("checked {} files ({} indexed, {} ids): {} errors, {} warnings, {} infos",
         files.len(), index.files.len(), index.ids.len(), n_err, n_warn, n_info);

@@ -56,10 +56,11 @@ function configureAndStartLanguageServer(context: ExtensionContext) {
 	const assumeCreateSucceeds = workspace.getConfiguration(CONFIG_NAME).get<boolean>('assumeCreateSucceeds', true);
 	const callerInference = workspace.getConfiguration(CONFIG_NAME).get<boolean>('callerInference', false);
 	const lint = workspace.getConfiguration(CONFIG_NAME).get<boolean>('lint', true);
+	const runtimeLogs = workspace.getConfiguration(CONFIG_NAME).get<string[]>('runtimeLogs', []);
 	const stringTableLanguages = workspace.getConfiguration(CONFIG_NAME).get<string[]>('stringTableLanguages', ['DE', 'US']);
 	const initializationOptions = gameExecutable
-		? { gameDir: path.dirname(gameExecutable), typeChecks, fieldTypes, objectIds, nilChecks, assumeCreateSucceeds, callerInference, lint, stringTableLanguages }
-		: { typeChecks, fieldTypes, objectIds, nilChecks, assumeCreateSucceeds, callerInference, lint, stringTableLanguages };
+		? { gameDir: path.dirname(gameExecutable), typeChecks, fieldTypes, objectIds, nilChecks, assumeCreateSucceeds, callerInference, lint, runtimeLogs, stringTableLanguages }
+		: { typeChecks, fieldTypes, objectIds, nilChecks, assumeCreateSucceeds, callerInference, lint, runtimeLogs, stringTableLanguages };
 
 	const serverOptions: ServerOptions = {
 		run: {
@@ -96,7 +97,7 @@ function configureAndStartLanguageServer(context: ExtensionContext) {
 	client.info("Client started");
 
 	// the server reads these once (initializationOptions): offer a reload when one changes
-	const serverSettings = ['pathToGameExecutable', 'typeChecks', 'fieldTypes', 'objectIds', 'nilChecks', 'assumeCreateSucceeds', 'callerInference', 'lint', 'stringTableLanguages'];
+	const serverSettings = ['pathToGameExecutable', 'typeChecks', 'fieldTypes', 'objectIds', 'nilChecks', 'assumeCreateSucceeds', 'callerInference', 'lint', 'runtimeLogs', 'stringTableLanguages'];
 	context.subscriptions.push(workspace.onDidChangeConfiguration(e => {
 		if (serverSettings.some(s => e.affectsConfiguration(CONFIG_NAME + '.' + s))) {
 			window.showInformationMessage('Legacy Clonk: reload the window to apply the changed language server setting.', 'Reload Window')
