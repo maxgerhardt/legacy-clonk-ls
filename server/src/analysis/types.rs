@@ -134,9 +134,15 @@ fn merge(a: Option<State>, b: Option<State>) -> Option<State> {
         (None, x) | (x, None) => x,
         (Some(mut a), Some(b)) => {
             // a call fact ("Contained() isn't nil") holds after the join only if it holds on both paths
-            a.retain(|k, _| !k.starts_with(CALL_FACT) || b.contains_key(k));
+            a.retain(|k, _| !(k.starts_with(CALL_FACT) || k.starts_with(ARR_LEN)) || b.contains_key(k));
             for (k, v) in b {
-                if k.starts_with(CALL_FACT) && !a.contains_key(&k) {
+                if (k.starts_with(CALL_FACT) || k.starts_with(ARR_LEN)) && !a.contains_key(&k) {
+                    continue;
+                }
+                if k.starts_with(ARR_LEN) {
+                    // the smaller known length holds on both paths
+                    let e = a.get_mut(&k).unwrap();
+                    *e = (*e).min(v);
                     continue;
                 }
                 *a.entry(k).or_insert(NONE) |= v;
@@ -156,6 +162,15 @@ fn transferable(key: &str) -> bool {
     key.trim_start_matches(CALL_FACT).split(|c| c == '(' || c == ',' || c == ')').skip(1).filter(|a| !a.is_empty())
         .all(|a| a.chars().all(|c| c.is_ascii_digit()) || NIL_SOURCES.contains(&a)
             || (a.len() == 4 && a.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')))
+}
+
+/// State key prefix of a function variable's known minimum array length (`var a = [1, 2, 3]` -> 3; a[] = x,
+/// a[5] = x and a ..= [...] grow it, other assignments and reference parameters drop it): `a[k]` with a constant
+/// k below it is an element, not nil. The value is the length (not a type).
+const ARR_LEN: &str = "\u{1}n:";
+
+fn len_key(name: &str) -> String {
+    format!("{}{}", ARR_LEN, name)
 }
 
 /// State key prefix of a call fact: the type a call like `Contained()` / `GetCrew(iPlr)` has after a guard
@@ -409,6 +424,7 @@ impl<'a> Infer<'a> {
     /// Set a variable's type on this path (and the shadow entries of a reference parameter).
     fn put(&self, st: &mut State, name: &str, t: Ty) {
         st.insert(name.to_string(), t);
+        st.remove(&len_key(name));
         // a call fact about GetCrew(iPlr) ends when iPlr changes
         if st.keys().any(|k| k.starts_with(CALL_FACT)) {
             let is_arg = |k: &str| k.split(|c| c == '(' || c == ',' || c == ')').skip(1).any(|a| a == name);
@@ -458,6 +474,9 @@ impl<'a> Infer<'a> {
                     if is_var {
                         if let Some(st) = s.as_mut() {
                             self.put(st, self.text(id), t);
+                            if let Some(len) = nc.get(1).and_then(|v| self.literal_len(v)) {
+                                st.insert(len_key(self.text(id)), len);
+                            }
                         }
                         self.out.at.insert(id.id(), t);
                     }
@@ -650,6 +669,25 @@ impl<'a> Infer<'a> {
         }
     }
 
+    /// The number of elements of an array literal.
+    fn literal_len(&self, n: &Node) -> Option<u16> {
+        (n.kind() == "array").then(|| named_children(n).iter().filter(|c| c.kind() != "comment").count().min(u16::MAX as usize) as u16)
+    }
+
+    /// A constant non-negative index (number literal).
+    fn const_index(&self, n: &Node) -> Option<u16> {
+        // 4-digit numbers like 1000 are lexed as IDs
+        if n.kind() != "number" && !(n.kind() == "id" && self.text(n).chars().all(|c| c.is_ascii_digit())) {
+            return None;
+        }
+        let t = self.text(n);
+        let v = match t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
+            Some(h) => u32::from_str_radix(h, 16).ok()?,
+            None => t.parse::<u32>().ok()?,
+        };
+        (v < u16::MAX as u32).then_some(v as u16)
+    }
+
     fn narrow_into(&self, cond: &Node, st: &mut State, truth: bool) {
         let nc: Vec<Node> = named_children(cond).into_iter().filter(|c| c.kind() != "comment").collect();
         let op = children(cond).iter().find(|c| !c.is_named() && !matches!(c.kind(), "(" | ")")).map(|c| c.kind().to_string()).unwrap_or_default();
@@ -778,8 +816,16 @@ impl<'a> Infer<'a> {
                         self.expr(*i, s);
                     }
                 }
-                // a[i] of an array: an element, or nil out of range
-                if !dot && kinds(tb) & !NIL == ARRAY { elements(tb) | NIL } else { ANY }
+                // a[i] of an array: an element, or nil out of range (in range when k is constant and below a[]'s
+                // known length)
+                let in_range = match (nc.first(), nc.get(1)) {
+                    (Some(b), Some(i)) if !dot && b.kind() == "identifier" => match (self.const_index(i), s.as_ref().and_then(|st| st.get(&len_key(self.text(b))).copied())) {
+                        (Some(k), Some(len)) => k < len,
+                        _ => false,
+                    },
+                    _ => false,
+                };
+                if !dot && kinds(tb) & !NIL == ARRAY { if in_range { elements(tb) } else { elements(tb) | NIL } } else { ANY }
             }
             "unary_expression" => {
                 let op = self.op(&n);
@@ -906,16 +952,32 @@ impl<'a> Infer<'a> {
             "=" => {
                 let tr = self.expr(r, s);
                 match l.kind() {
-                    "identifier" => self.assign(&l, tr, s),
+                    "identifier" => {
+                        self.assign(&l, tr, s);
+                        if let (Some(len), true, Some(st)) = (self.literal_len(&r), self.locals.contains(self.text(&l)), s.as_mut()) {
+                            st.insert(len_key(self.text(&l)), len);
+                        }
+                    }
                     // a[] = x, a[i] = x: the array also holds x now
                     "array_append" | "map_access" if !children(&l).iter().any(|c| c.kind() == ".") => {
                         self.expr(l, s);
                         if let Some(base) = named_children(&l).into_iter().next().filter(|b| b.kind() == "identifier") {
+                            let old = s.as_ref().and_then(|st| st.get(&len_key(self.text(&base))).copied());
                             let cur = self.expr(base, s);
                             if kinds(cur) & ARRAY != 0 {
                                 self.assign(&base, cur | array_of(tr), s);
                             } else if !self.locals.contains(self.text(&base)) {
                                 self.assign(&base, array_of(tr), s);
+                            }
+                            // a[] = x: one more; a[k] = x: at least k + 1; a[i] = x: unchanged
+                            let index = named_children(&l).into_iter().filter(|c| c.kind() != "comment").nth(1);
+                            let new = match (l.kind(), index.as_ref().and_then(|i| self.const_index(i))) {
+                                ("array_append", _) => old.map(|n| n.saturating_add(1)),
+                                (_, Some(k)) => Some(old.unwrap_or(0).max(k.saturating_add(1))),
+                                _ => old,
+                            };
+                            if let (Some(n), true, Some(st)) = (new, kinds(cur) & ARRAY != 0 && self.locals.contains(self.text(&base)), s.as_mut()) {
+                                st.insert(len_key(self.text(&base)), n);
                             }
                         }
                     }
@@ -960,9 +1022,14 @@ impl<'a> Infer<'a> {
             "..=" => {
                 let tl = self.expr(l, s);
                 self.out.read_at.insert(l.id(), tl);
+                let old = if l.kind() == "identifier" { s.as_ref().and_then(|st| st.get(&len_key(self.text(&l))).copied()) } else { None };
                 let tr = self.expr(r, s);
                 let t = concat(tl, tr);
                 self.assign(&l, t, s);
+                // a ..= [x, y]: two more; a ..= other: at least as long as before
+                if let (Some(n), Some(st)) = (old, s.as_mut()) {
+                    st.insert(len_key(self.text(&l)), n.saturating_add(self.literal_len(&r).unwrap_or(0)));
+                }
                 t
             }
             "??=" => {
