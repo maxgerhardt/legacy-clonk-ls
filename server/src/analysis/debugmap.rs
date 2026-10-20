@@ -40,7 +40,7 @@ pub fn engine_name_for(local: &Path, engine_names: &[String]) -> Option<String> 
 /// script inside a packed group the language server's unpacked copy of that pack
 /// (`%LOCALAPPDATA%/legacy-clonk-ls/packs/<pack>-<size>-<mtime>/<pack>/...`) if it exists.
 pub fn local_path_for(engine_name: &str, engine_cwd: &Path) -> Option<PathBuf> {
-    let direct = PathBuf::from(engine_name.replace('\\', std::path::MAIN_SEPARATOR_STR));
+    let direct = PathBuf::from(engine_name.replace(['/', '\\'], std::path::MAIN_SEPARATOR_STR));
     let full = if direct.is_absolute() { direct } else { engine_cwd.join(direct) };
     if full.is_file() {
         return Some(full);

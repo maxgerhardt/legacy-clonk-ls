@@ -184,7 +184,8 @@ impl Adapter {
         let port = args["port"].as_u64().map(|p| p as u16).unwrap_or_else(free_port);
         self.stop_on_entry = args["stopOnEntry"].as_bool().unwrap_or(false);
         let mut cmd = std::process::Command::new(&engine);
-        cmd.arg(scenario);
+        // native separators: with '/' in the path the engine skips the definitions of enclosing .c4f folders
+        cmd.arg(scenario.replace(['/', '\\'], std::path::MAIN_SEPARATOR_STR));
         if let Some(p) = args["player"].as_str().filter(|p| !p.is_empty()) {
             cmd.arg(p);
         }
