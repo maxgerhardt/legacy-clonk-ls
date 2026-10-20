@@ -16,7 +16,10 @@
 	"repository": "https://github.com/fmilke/legacy-clonk-ls",
 	"activationEvents": [
 		"workspaceContains:clonk",
-		"workspaceContains:clonk.exe"
+		"workspaceContains:clonk.exe",
+		"onDebugResolve:c4script",
+		"onDebugDynamicConfigurations:c4script",
+		"onCommand:legacy-clonk-ext.debugScenario"
 	],
 	"preview": true,
 	"displayName": "Legacy Clonk Extension",
@@ -120,6 +123,11 @@
 					"default": false,
 					"description": "Warn about obj->F() where obj may be nil: it comes from a function that can find nothing (FindObject, FindObject2, Contained, Contents, GetCursor, ...) and no if (obj) / if (!obj) return; guards the call. nil->F() stops the script (also with ->~); obj?->F() is nil-safe. Needs typeChecks."
 				},
+				"legacy-clonk-ext.debugEngine": {
+					"type": "string",
+					"default": "",
+					"description": "clonk.exe used by the script debugger (Run > Start Debugging on a scenario): it needs the debugger (/debug:<port>), which official releases don't have yet (LegacyClonk fork, branch debugger). Empty: pathToGameExecutable."
+				},
 				"legacy-clonk-ext.runtimeLogs": {
 					"type": "array",
 					"items": {
@@ -155,6 +163,11 @@
 			{
 				"command": "legacy-clonk-ext.runScenarioInEditor",
 				"title": "Run in Editor"
+			},
+			{
+				"command": "legacy-clonk-ext.debugScenario",
+				"category": "LegacyClonk",
+				"title": "Debug Scenario"
 			}
 		],
 		"menus": {
@@ -170,9 +183,121 @@
 				{
 					"command": "legacy-clonk-ext.runScenarioInEditor",
 					"when": "resourceExtname == .c4s"
+				},
+				{
+					"command": "legacy-clonk-ext.debugScenario",
+					"when": "resourceExtname == .c4s"
 				}
 			]
 		},
+		"breakpoints": [
+			{
+				"language": "c4script"
+			}
+		],
+		"debuggers": [
+			{
+				"type": "c4script",
+				"label": "C4Script (LegacyClonk)",
+				"languages": [
+					"c4script"
+				],
+				"configurationAttributes": {
+					"launch": {
+						"required": [
+							"scenario"
+						],
+						"properties": {
+							"scenario": {
+								"type": "string",
+								"description": "The scenario (.c4s folder or file) to run."
+							},
+							"engine": {
+								"type": "string",
+								"description": "clonk.exe with the script debugger. Default: the setting legacy-clonk-ext.debugEngine, else pathToGameExecutable."
+							},
+							"player": {
+								"type": "string",
+								"description": "Player file (.c4p) that joins. Default: the engine configuration's players."
+							},
+							"args": {
+								"type": "array",
+								"items": {
+									"type": "string"
+								},
+								"description": "More engine arguments, e.g. [\"/config:C:/path/config.txt\"]."
+							},
+							"cwd": {
+								"type": "string",
+								"description": "Working folder of the engine (its Clonk.log is written there). Default: the engine's folder."
+							},
+							"log": {
+								"type": "string",
+								"description": "Engine log shown in the debug console. Default: <cwd>/Clonk.log."
+							},
+							"port": {
+								"type": "number",
+								"description": "Debugger port (/debug:<port>). Default: a free one."
+							},
+							"stopOnEntry": {
+								"type": "boolean",
+								"default": false,
+								"description": "Stop at the first script that runs."
+							}
+						}
+					},
+					"attach": {
+						"required": [
+							"port"
+						],
+						"properties": {
+							"port": {
+								"type": "number",
+								"description": "The port of an engine started with /debug:<port>."
+							},
+							"cwd": {
+								"type": "string",
+								"description": "The engine's working folder (for script paths relative to it)."
+							},
+							"log": {
+								"type": "string",
+								"description": "Engine log (Clonk.log) shown in the debug console."
+							}
+						}
+					}
+				},
+				"initialConfigurations": [
+					{
+						"type": "c4script",
+						"request": "launch",
+						"name": "Debug scenario",
+						"scenario": "${workspaceFolder}/MyScenario.c4s"
+					}
+				],
+				"configurationSnippets": [
+					{
+						"label": "C4Script: Debug a scenario",
+						"description": "Start a scenario in the engine with the script debugger",
+						"body": {
+							"type": "c4script",
+							"request": "launch",
+							"name": "Debug scenario",
+							"scenario": "^\"\\${workspaceFolder}/MyScenario.c4s\""
+						}
+					},
+					{
+						"label": "C4Script: Attach to an engine",
+						"description": "Attach to an engine started with /debug:<port>",
+						"body": {
+							"type": "c4script",
+							"request": "attach",
+							"name": "Attach to engine",
+							"port": 4877
+						}
+					}
+				]
+			}
+		],
 		"languages": [
 			{
 				"id": "c4ini",

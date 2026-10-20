@@ -40,3 +40,7 @@ path = "src/bin/c4check.rs"
 [[bin]]
 name = "c4format"
 path = "src/bin/c4format.rs"
+
+[[bin]]
+name = "c4dap"
+path = "src/bin/c4dap.rs"

@@ -11,6 +11,7 @@ import {
 import { C4Group } from './c4group';
 import { ScenarioRunner } from './runner';
 import { CONFIG_NAME } from './config';
+import { configureDebugger } from './debug';
 
 let client: LanguageClient;
 
@@ -19,6 +20,7 @@ export function activate(context: ExtensionContext) {
 	configureTreeViewCommands(context, outputChannel);
 	configureIdSelectCommand(context, outputChannel);
 	configureAndStartLanguageServer(context);
+	configureDebugger(context);
 }
 
 function configureAndStartLanguageServer(context: ExtensionContext) {

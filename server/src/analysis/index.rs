@@ -1384,7 +1384,8 @@ pub fn pack_cache_root() -> PathBuf {
     base.join("legacy-clonk-ls").join("packs")
 }
 
-fn unpack_cached(game_dir: &Path, pack: &Path) -> Result<PathBuf, String> {
+/// (cache slot, unpacked folder) of a packed group: `packs/<name>-<size>-<mtime>/<name>` (the folder may not exist yet).
+pub fn pack_cache_slot(pack: &Path) -> Result<(PathBuf, PathBuf), String> {
     let meta = std::fs::metadata(pack).map_err(|e| e.to_string())?;
     let mtime = meta
         .modified()
@@ -1395,6 +1396,11 @@ fn unpack_cached(game_dir: &Path, pack: &Path) -> Result<PathBuf, String> {
     let name = pack.file_name().ok_or("no file name")?.to_string_lossy().to_string();
     let slot = pack_cache_root().join(format!("{}-{}-{}", name, meta.len(), mtime));
     let target = slot.join(&name);
+    Ok((slot, target))
+}
+
+fn unpack_cached(game_dir: &Path, pack: &Path) -> Result<PathBuf, String> {
+    let (slot, target) = pack_cache_slot(pack)?;
     if target.is_dir() {
         return Ok(target);
     }

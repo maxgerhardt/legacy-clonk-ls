@@ -34,9 +34,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: server
-      - name: Build language server and c4check
+      - name: Build language server, c4check and the debug adapter
         working-directory: server
-        run: cargo build --release --bin lsp --bin c4check
+        run: cargo build --release --bin lsp --bin c4check --bin c4dap
       - name: Unit tests
         working-directory: server
         run: cargo test --release
@@ -49,6 +49,7 @@ jobs:
           path: |
             server/target/release/lsp${{ matrix.exe }}
             server/target/release/c4check${{ matrix.exe }}
+            server/target/release/c4dap${{ matrix.exe }}
           if-no-files-found: error
 
   package:
@@ -69,7 +70,10 @@ jobs:
           cp artifacts/server-win32-x64/lsp.exe client/client/out/lsp.exe
           cp artifacts/server-linux-x64/lsp client/client/out/lsp-linux-x64
           cp artifacts/server-darwin-arm64/lsp client/client/out/lsp-darwin-arm64
-          chmod +x client/client/out/lsp-*
+          cp artifacts/server-win32-x64/c4dap.exe client/client/out/c4dap.exe
+          cp artifacts/server-linux-x64/c4dap client/client/out/c4dap-linux-x64
+          cp artifacts/server-darwin-arm64/c4dap client/client/out/c4dap-darwin-arm64
+          chmod +x client/client/out/lsp-* client/client/out/c4dap-*
       - name: Bundle extension
         working-directory: client
         run: |

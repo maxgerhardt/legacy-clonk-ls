@@ -3,6 +3,7 @@
 pub mod assets;
 pub mod callers;
 pub mod complete;
+pub mod debugmap;
 pub mod diagnostics;
 pub mod engine;
 pub mod format;

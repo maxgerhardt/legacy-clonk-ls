@@ -3,6 +3,9 @@
 !client/out/lsp
 !client/out/lsp.exe
 !client/out/lsp-*
+!client/out/c4dap
+!client/out/c4dap.exe
+!client/out/c4dap-*
 !icon.png
 !icons/
 !themes/*.json
