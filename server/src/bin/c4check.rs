@@ -103,6 +103,9 @@ fn main() {
     if lint_files() {
         let mut ini_files: Vec<PathBuf> = vec![];
         let starts: Vec<PathBuf> = if targets.is_empty() { index.roots.clone() } else { targets.iter().map(PathBuf::from).collect() };
+        fn is_ini(name: &str) -> bool {
+            ["DefCore.txt", "ActMap.txt", "Scenario.txt"].iter().any(|x| x.eq_ignore_ascii_case(name))
+        }
         fn walk(d: &std::path::Path, out: &mut Vec<PathBuf>) {
             for e in std::fs::read_dir(d).into_iter().flatten().flatten() {
                 let p = e.path();
@@ -111,14 +114,17 @@ fn main() {
                     if ![".git", "target", "node_modules", ".claude"].contains(&n.as_str()) {
                         walk(&p, out);
                     }
-                } else if ["DefCore.txt", "ActMap.txt", "Scenario.txt"].iter().any(|x| x.eq_ignore_ascii_case(&n)) {
+                } else if is_ini(&n) {
                     out.push(p);
                 }
             }
         }
         for s in &starts {
             let s = std::path::Path::new(s);
-            if s.is_dir() { walk(s, &mut ini_files) } else if s.is_file() { ini_files.push(s.to_path_buf()) }
+            // a single file: only an INI file itself (a Script.c given directly isn't one: its function
+            // descriptions [..] looked like unknown sections)
+            let named_ini = s.file_name().map(|n| is_ini(&n.to_string_lossy())).unwrap_or(false);
+            if s.is_dir() { walk(s, &mut ini_files) } else if s.is_file() && named_ini { ini_files.push(s.to_path_buf()) }
         }
         ini_files.sort();
         ini_files.dedup();
@@ -127,7 +133,8 @@ fn main() {
             let kind = match name.as_str() {
                 "defcore.txt" => legacy_clonk_ls::analysis::ini::IniFile::DefCore,
                 "actmap.txt" => legacy_clonk_ls::analysis::ini::IniFile::ActMap,
-                _ => legacy_clonk_ls::analysis::ini::IniFile::Scenario,
+                "scenario.txt" => legacy_clonk_ls::analysis::ini::IniFile::Scenario,
+                _ => continue,
             };
             let text = decode_bytes(&std::fs::read(&p).unwrap_or_default());
             let ctx = legacy_clonk_ls::analysis::ini::Ctx { index: &index, path: &p, game_dir: game_dir.as_deref() };
