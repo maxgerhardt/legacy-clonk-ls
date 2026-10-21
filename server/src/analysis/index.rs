@@ -922,15 +922,16 @@ impl Index {
 
     /// Would the engine load `target` (a script or DefCore.txt) when running the scenario `from` belongs to?
     /// Mirrors C4Game::OpenScenario/InitDefs: the scenario's own folder, every enclosing .c4f folder (minus
-    /// other scenarios inside them), the packs from its [Definitions], and System.c4g groups. Scripts that
-    /// aren't part of a scenario (packs, folder definitions) can be loaded by any scenario: everything is
-    /// visible from them.
+    /// other scenarios inside them), the packs from its [Definitions], and System.c4g groups. A definition in a
+    /// .c4f folder (outside its scenarios) is loaded only by the scenarios inside that folder: it sees the folder
+    /// (scenario-local definitions included, to stay on the safe side), the packs any of them loads and the game's
+    /// System.c4g. Other scripts outside scenarios (packs) can be loaded by any scenario: everything is visible.
     pub fn visible_from(&self, from: &Path, target: &Path) -> bool {
         let fk = path_key(from);
         let tk = path_key(target);
         let scen = match prefix_through(&fk, ".c4s", true) {
             Some(s) => s,
-            None => return true,
+            None => return self.visible_from_folder(&fk, &tk),
         };
         if tk.starts_with(&scen) {
             return true;
@@ -953,6 +954,32 @@ impl Index {
         tk.contains("/system.c4g/") && prefix_through(&tk, ".c4f", false).is_none() && prefix_through(&tk, ".c4d", false).is_none()
     }
 
+    /// The packs the scenarios inside the outermost .c4f folder of `fk` load (that folder's prefix and the union of
+    /// their [Definitions]); None outside .c4f folders or when no scenario inside is known.
+    fn folder_scenario_packs(&self, fk: &str) -> Option<(String, HashSet<String>)> {
+        let folder = prefix_through(fk, ".c4f", true)?;
+        let mut packs = HashSet::new();
+        let mut any = false;
+        for (scen, names) in &self.scenario_packs {
+            if scen.starts_with(folder.as_str()) {
+                any = true;
+                packs.extend(names.iter().cloned());
+            }
+        }
+        any.then_some((folder, packs))
+    }
+
+    fn visible_from_folder(&self, fk: &str, tk: &str) -> bool {
+        let (folder, packs) = match self.folder_scenario_packs(fk) {
+            Some(x) => x,
+            None => return true,
+        };
+        if tk.starts_with(folder.as_str()) || packs.iter().any(|p| tk.contains(&format!("/{}/", p))) {
+            return true;
+        }
+        tk.contains("/system.c4g/") && prefix_through(tk, ".c4f", false).is_none() && prefix_through(tk, ".c4d", false).is_none()
+    }
+
     /// Is every pack that the scenario of `from` loads indexed, so its loaded functions are completely known?
     /// Scripts outside scenarios: unknown which scenario loads them -> false.
     pub fn scope_packs_indexed(&self, from: &Path) -> bool {
@@ -967,13 +994,15 @@ impl Index {
     }
 
     /// Does the scenario of script `from` load the pack with this file name (e.g. "Knights.c4d")?
-    /// Scripts outside scenarios: always.
+    /// Definitions in a .c4f folder: whether a scenario inside the folder loads it. Other scripts outside
+    /// scenarios: always.
     pub fn loads_pack(&self, from: &Path, pack: &str) -> bool {
-        let scen = match prefix_through(&path_key(from), ".c4s", true) {
-            Some(s) => s,
-            None => return true,
-        };
+        let fk = path_key(from);
         let name = pack.rsplit('/').next().unwrap_or(pack).to_lowercase();
+        let scen = match prefix_through(&fk, ".c4s", true) {
+            Some(s) => s,
+            None => return self.folder_scenario_packs(&fk).map_or(true, |(_, packs)| packs.contains(&name)),
+        };
         match self.scenario_packs.get(&scen) {
             Some(packs) => packs.contains(&name),
             None => name == "objects.c4d",
@@ -1097,9 +1126,20 @@ impl Index {
 
     /// Does `info` #include/#appendto a definition whose script isn't indexed (e.g. from a pack we don't have)?
     /// Then its visible functions and locals are unknown.
+    /// A definition that is indexed but not loaded by the script's scenario (all of whose packs are indexed) is no
+    /// unknown: the engine fails the #include and reports the missing functions (scope oracle InnerBad).
     pub fn has_unresolved_targets(&self, info: &FileInfo) -> bool {
+        let packs_known = self.scope_packs_indexed(&info.path);
         info.includes.iter().chain(info.appendto.iter().filter(|t| t.as_str() != "*"))
-            .any(|id| self.script_of(id, &info.path).is_none() && self.id_for(id, &info.path).map_or(true, |i| i.script.is_some()))
+            .any(|id| {
+                if self.script_of(id, &info.path).is_some() {
+                    return false;
+                }
+                match self.id_for(id, &info.path) {
+                    Some(i) => i.script.is_some(),
+                    None => !(packs_known && self.ids.contains_key(id.as_str())),
+                }
+            })
     }
 
     /// Scripts that #include the definition `id` (directly).
