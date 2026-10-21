@@ -551,7 +551,8 @@ impl<'a, 't> IdCtx<'a, 't> {
 }
 
 /// The expressions assigned to `name` in a function: `name = v`, `var name = v`, `name[] = v` / `name[i] = v` (an
-/// array's elements), `name ..= v`, `name ??= v`, and the collection of `for (var name in coll)`. `script_var`: only
+/// array's elements), `name ..= v`, `name ??= v`, the collection of `for (var name in coll)` and the ID of
+/// `name->ChangeDef(ID)` / `ChangeDef(ID, name)`. `script_var`: only
 /// assignments where `name` isn't a parameter/var of the function.
 pub(crate) fn assigned_values<'t>(func: &Node<'t>, name: &str, src: &str, script_var: bool) -> Vec<Node<'t>> {
     let mut out = vec![];
@@ -588,6 +589,20 @@ pub(crate) fn assigned_values<'t>(func: &Node<'t>, name: &str, src: &str, script
                     if target.map(|t| t.kind() == "identifier" && node_text(&t, src) == name).unwrap_or(false) {
                         out.push(*r);
                     }
+                }
+            }
+            // `name->ChangeDef(ID)` / `ChangeDef(ID, name)`: from then on the object is of ID (flow-insensitive: one more
+            // possible definition)
+            "method_call" if n.child_by_field_name("name").map(|x| node_text(&x, src) == "ChangeDef").unwrap_or(false) => {
+                let args: Vec<Node> = n.child_by_field_name("args").map(|a| named_children(&a)).unwrap_or_default()
+                    .into_iter().filter(|c| c.kind() != "comment").collect();
+                let target = if super::index::is_arrow_call(&n) {
+                    n.parent().and_then(|p| named_children(&p).into_iter().find(|c| c.kind() != "comment"))
+                } else {
+                    args.get(1).copied()
+                };
+                if target.map(|t| t.kind() == "identifier" && node_text(&t, src) == name).unwrap_or(false) {
+                    out.extend(args.first().copied());
                 }
             }
             _ => {}
